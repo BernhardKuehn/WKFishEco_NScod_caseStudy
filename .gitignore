@@ -2,3 +2,5 @@
 .Rhistory
 .RData
 .Ruserdata
+*.nc/
+ICES_stat_rect/
