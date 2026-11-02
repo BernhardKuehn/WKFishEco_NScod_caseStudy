@@ -4,3 +4,4 @@
 .Ruserdata
 *.nc/
 ICES_stat_rect/
+/results/model_01_fit_EMSRR/
