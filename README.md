@@ -4,7 +4,7 @@ This repository is a case study for developing environmentally modified stock-re
 
 The analysis is organized around three substocks: **Southern**, **Northwestern**, and **Viking**. It combines stock-assessment recruitment and spawning-stock biomass (SSB) time series with environmental covariates derived from AHOI data, then aims to carry the fitted relationships into reference-point calculations under historical and projected environmental conditions.
 
-> **Project status:** The repository currently contains scripts for processing AHOI data, calculating substock SST time series, joining SST to stock data, and several candidate stock-recruitment fitting helpers. The orchestration script for fitting EMSRRs is only a placeholder, and the climate-projection, data-conditioning, and reference-point steps in `to_do.txt` are not yet implemented here. The README describes the planned workflow as well as the present code; it does not imply that the full analysis is already executable.
+> **Project status:** The repository contains scripts for processing AHOI data, calculating substock SST time series, joining SST to stock data, and fitting candidate stock-recruitment models. The fitting script evaluates models on a chronological holdout, but the climate-projection, data-conditioning, and reference-point steps in `to_do.txt` are not yet implemented here. The input data are local and are not included in the repository.
 
 ## Analysis workflow
 
@@ -26,13 +26,13 @@ Steps 1 and part of step 2 have scripts in the repository. Steps 3-6 remain plan
 | `data_00_Handle_AHOI_data.R` | Reads AHOI NetCDF files, extracts environmental variables, combines monthly fields, and writes time-series rasters. |
 | `data_01_prepare_SST_by_stubstock.R` | Uses ICES statistical rectangles and the stock-area lookup table to calculate annual SST summaries for the three substocks. |
 | `data_02_join_SST_with_substock.R` | Extracts recruitment and age-lagged SSB from FLCore stock objects, lags SST by one year, joins the series, and saves the combined data. |
-| `model_01_fit_EMSRR.R` | Intended entry point for fitting EMSRRs; currently contains only a header. |
+| `model_01_fit_EMSRR.R` | Fits Beverton-Holt+MARS and SSB-only Beverton-Holt/hockey-stick models for all three substocks and evaluates the final 10 available years. |
 | `functions/MO.fitness.func.BevertonHolt_MARS.R` | Multiobjective fitness and fitting helpers combining Beverton-Holt stock-recruitment curves with MARS covariate effects. |
 | `functions/MO.fitness.func.envHockeyStick_MARS.R` | Multiobjective fitness and fitting helpers combining hockey-stick curves with MARS covariate effects. |
 | `functions/MO.fitness.func.envHockeyStick.RANSACK_MARS.R` | Experimental robust RANSAC hockey-stick and MARS helpers. |
 | `to_do.txt` | Short list of planned analysis steps. |
 
-The fitting helpers are not currently invoked by `model_01_fit_EMSRR.R`. Integration with FLasherEMSRR and mseEMSRR, including the expected model-object interfaces and reference-point inputs, still needs to be specified and implemented.
+The helper functions remain research candidates; `model_01_fit_EMSRR.R` implements a reproducible chronological split and standalone fitting/evaluation pipeline. Integration with FLasherEMSRR and mseEMSRR, including the expected model-object interfaces and reference-point inputs, still needs to be specified and implemented.
 
 ## Data requirements
 
@@ -100,9 +100,17 @@ The checked-in helper files include:
 - hockey-stick plus MARS residual effects; and
 - an experimental robust/continuous hockey-stick approach using RANSAC and MARS.
 
-The multiobjective fitness functions support repeated cross-validation and optional holdout evaluation. They can return predicted-versus-observed cross-validation results or evaluate a caller-supplied metric. These are research helpers rather than a finished, reproducible model-fitting pipeline: the model script does not select covariates, fit final substock models, save model objects, or pass fitted objects to either downstream package.
+The multiobjective fitness functions support repeated cross-validation and optional holdout evaluation. They can return predicted-versus-observed cross-validation results or evaluate a caller-supplied metric. The fitting script currently uses lagged SST as its sole MARS predictor and fits separate models for Southern, Northwestern, and Viking. Its baseline is a Beverton-Holt curve, with the SST MARS model fitted to log-recruitment residuals; predictions multiply the Beverton-Holt prediction by the exponentiated MARS residual effect. Two SSB-only alternatives are also fitted: Beverton-Holt and a hockey-stick model. The latter is the requested native stock-recruitment comparator; including both baselines makes it possible to distinguish environmental improvement from a change in stock-recruitment curve shape.
 
-Before using any candidate model for management reference points, document and review the model formula, covariate and lag selection, fitting constraints, cross-validation design, performance metric, holdout design, random seeds, and final model-selection criteria.
+The script selects the latest 10 distinct calendar years in `env_stk` as a chronological holdout and uses every earlier complete, positive observation for training. Therefore the realized training fraction depends on the joined data coverage and may differ from 75%; no years between the training period and holdout are discarded. All compared models use the same matched observations. The script reports RMSE, MAE, log-RMSE, and log bias; positive percentage improvement in log-RMSE means the EMSRR outperformed that baseline. This is a holdout comparison, not a separately tuned cross-validation estimate. The model objects and run metadata are saved for reproducibility.
+
+Run the fitting script from the repository root after preparing `data/Cod_Env_data.rda`:
+
+```r
+source("model_01_fit_EMSRR.R")
+```
+
+The script requires the `earth` package and expects `env_stk` to contain `year`, `rec`, `ssb_lag1`, `SST_lag1`, and `substock`. It writes holdout predictions, metrics, comparisons, fitted parameters, and an RDS containing model objects and session information to `results/model_01_fit_EMSRR/`. Review the data alignment, holdout year coverage, fitted curves, and performance before using any candidate model for management reference points. The fitted objects are not yet adapted to the interfaces required by FLasherEMSRR or mseEMSRR.
 
 ## Dependencies and reproducibility
 
