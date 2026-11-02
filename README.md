@@ -1,5 +1,3 @@
-Here is the current `README.md`. It’s in my session worktree, but the push to protected `main` failed, so it isn’t visible on GitHub yet.
-
 # Northwest-shelf cod EMSRR case study
 
 This repository is a case study for developing environmentally modified stock-recruitment relationships (EMSRRs) for the three Northwest-shelf cod substocks and using those relationships in a reference-point calculation workflow. The intended downstream workflow uses the `FLasherEMSRR` and `mseEMSRR` R packages.
