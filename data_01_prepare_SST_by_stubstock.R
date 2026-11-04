@@ -140,11 +140,48 @@ lines(sst_substk$year,scale(sst_substk$SST_Viking),col = "blue")
 cor(sst_substk)
 # differences are marginal, correlations all above 0.77
 
+# ---------------------------------------- #
+# alternative: 
+# calculate main pattern per area via EOTs
+# ---------------------------------------- #
+
+library(fast.EOT)
+
+EOTs_sst_yr_by_substock = lapply(sst_yr_by_substock,function(x)
+                                 fast.EOT::fast.eot(x = brick(x),n = 10,
+                                   standardised = T,
+                                   n_cores = 8,verbose = T))
+
+# check the different EOTs per subarea
+lapply(EOTs_sst_yr_by_substock,function(x) plot_eot(x,n = 10))
+
+# extract temporal pattern
+
+eots_ts_out = lapply(names(EOTs_sst_yr_by_substock),
+       function(x){
+         eot_out = EOTs_sst_yr_by_substock[[x]]
+         eot_ts = as.data.frame(sapply(eot_out, function(x) x@eot))
+         names(eot_ts) = paste("SST",x,names(eot_ts),sep = "_")
+         # add yrs 
+         eot_ts = data.frame(year = as.numeric(names(sst_yr_by_substock[[x]])),
+                             eot_ts)
+         return(eot_ts)
+       })
+
+# par(mfrow = c(1,1))
+# plot(scale(eot_ts[,1]),type = "l")
+# for(i in 2:10)
+# lines(scale(eot_ts[,i]))
+
+# join
+eots_sst_substk = mult.merge("yr","eots_ts_out",by = "year")
+
 # --------- #
 # write out
 # --------- #
 
 save(object = sst_substk,file = file.path("./data/Env/processed","SST_yr_by_cod_substock.rda"))
+save(object = eots_sst_substk,file = file.path("./data/Env/processed","EOT_SST_yr_by_cod_substock.rda"))
 
 
 

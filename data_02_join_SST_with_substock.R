@@ -7,6 +7,8 @@ rm(list = ls())
 library(readxl)
 library(FLCore)
 library(ggplot2)
+library(stringr)
+
 
 # --------- #
 # load data
@@ -14,6 +16,8 @@ library(ggplot2)
 
 # load SST
 load("./data/Env/processed/SST_yr_by_cod_substock.rda")
+# load SST EOTs
+load("./data/Env/processed/EOT_SST_yr_by_cod_substock.rda")
 
 # load stock data
 tmp.nm = load("./data/stock/cod46a7d20_FLstockObjects_assessment_2026.Rdata")
@@ -50,25 +54,34 @@ cod_substks = do.call(rbind,cod_substks_lst)
 # join with the environmental data
 # -------------------------------- #
 
+# rename SST mean
+names(sst_substk)[grep("SST",names(sst_substk))] <- 
+  gsub("SST","SST_mean",names(sst_substk)[grep("SST",names(sst_substk))])
+
+# join mean and EOTs
+eot_mean_sst_substk = merge(eots_sst_substk,sst_substk,by = "year")
+
 # lag SST
-sst_substk_lag = sst_substk
-sst_substk_lag[,-1] = apply(sst_substk[,-1],2,function(x) dplyr::lag(x,1))
+eot_mean_sst_substk_lag = eot_mean_sst_substk
+eot_mean_sst_substk_lag[,-1] = apply(eot_mean_sst_substk[,-1],2,function(x) dplyr::lag(x,1))
 # bring to long format
-sst_substk_long = pivot(sst_substk_lag,ids = "year",names = list("variable","SST_lag1"))
-sst_substk_long$substock = gsub(".*_","",sst_substk_long$variable)
+eot_mean_sst_substk_long = pivot(eot_mean_sst_substk_lag,ids = "year")
+eot_mean_sst_substk_long$substock = str_extract(pattern = "Northwestern|Southern|Viking",
+                                                string = eot_mean_sst_substk_long$variable)
 
 unique(cod_substks$substock)
-unique(sst_substk_long$substock)
+unique(eot_mean_sst_substk_long$substock)
 cod_substks$substock = ifelse(grepl("Northwest",cod_substks$substock),"Northwestern",
                               ifelse(grepl("South",cod_substks$substock),"Southern",cod_substks$substock))
-env_stk = merge(cod_substks,sst_substk_long[,c("year","SST_lag1","substock")],by = c("year","substock"))
+env_stk = merge(cod_substks,eot_mean_sst_substk_long[,c("year","variable","value","substock")],by = c("year","substock"))
 head(env_stk)
 
 
 # check relationship between recruitment and SST_lag1
-ggplot(env_stk,aes(x = SST_lag1,y = rec,color = substock,group = substock)) + 
+ggplot(env_stk,aes(x = value,y = rec,color = substock,group = substock)) + 
   geom_point() + 
-  geom_smooth()
+  geom_smooth() + 
+  facet_wrap(~variable,scale = "free_x")
 
 
 # --------- #
