@@ -26,7 +26,7 @@ output_dir <- "./results/model_01_fit_EMSRR"
 ssb_column <- "ssb_lag1"
 expected_substocks <- c("Southern", "Northwestern", "Viking")
 holdout_n_years <- 10L
-n_boot <- 1000L
+n_boot <- 100L
 seed <- 2026L
 earth_pmethod <- "exhaustive"
 
@@ -69,6 +69,8 @@ dat$substock <- as.character(dat$substock)
 # -------------------------- #
 # Model and metric helpers
 # -------------------------- #
+
+source("./functions/calc.partial.effects.R")
 
 # Fit R = a * S / (S + b) by minimizing squared log-scale residuals.
 # For any fixed b, the minimizing log(a) has a closed-form solution, leaving
@@ -150,6 +152,16 @@ predict_emsrr <- function(bh_model, mars_model, ssb, covariate) {
   
   exp(log(baseline) + residual_effect)
 }
+
+predict_emsrr_model <- function(model.obj, newdata) {
+  predict_emsrr(
+    bh_model = model.obj$bh_model,
+    mars_model = model.obj$mars_model,
+    ssb = newdata[[model.obj$ssb_name]],
+    covariate = newdata[[model.obj$covariate_name]]
+  )
+}
+
 
 # -------------------------- #
 # Bootstrap selection
@@ -352,7 +364,7 @@ for (substock in expected_substocks) {
       candidate_rows[[candidate_row_index]] <- bootstrap_rows
       candidate_row_index <- candidate_row_index + 1L
     }
-  }http://127.0.0.1:33392/graphics/plot_zoom_png?width=2170&height=1092
+  }
 }
 
 if (!length(candidate_rows)) {
@@ -387,6 +399,7 @@ selected_models <- list()
 selection_rows <- list()
 holdout_metric_rows <- list()
 holdout_prediction_rows <- list()
+partial_effects_by_substock <- list()
 
 for (substock in expected_substocks) {
   substock_metrics <- candidate_metrics[
@@ -517,6 +530,43 @@ for (substock in expected_substocks) {
          selected_variable, ": ", conditionMessage(e))
   })
   
+  # Provide the predictor names and adapter expected by calc.partial.effects().
+  final_fit$ssb_name <- ssb_column
+  final_fit$covariate_name <- selected_variable
+  final_fit$vars <- c(ssb_column, selected_variable)
+  
+  # Calculate and plot partial effects on training data only; the holdout remains
+  # reserved for external performance evaluation.
+  partial_x <- data.frame(
+    selected_training[[ssb_column]],
+    selected_training$value,
+    check.names = FALSE
+  )
+  names(partial_x) <- c(ssb_column, selected_variable)
+  
+  partial_effects <- calc.partial.effects(
+    model.obj = final_fit,
+    y = selected_training$rec,
+    x = partial_x,
+    predict.func = predict_emsrr_model
+  )
+  
+  partial_plot <- partial_effects$plot +
+    ggplot2::ggtitle(paste(substock, "-", selected_variable))
+  
+  ggplot2::ggsave(
+    filename = file.path(
+      output_dir,
+      paste0("partial_effects_", substock, ".png")
+    ),
+    plot = partial_plot,
+    width = 8,
+    height = 5,
+    dpi = 300
+  )
+  
+  partial_effects_by_substock[[substock]] <- partial_effects
+  
   # Fit the SSB-only benchmark using all usable stock training years.
   stock_rows <- dat[dat$substock == substock, , drop = FALSE]
   stock_by_year <- unique(stock_rows[, c("year", "rec", ssb_column)])
@@ -602,6 +652,11 @@ utils::write.csv(
   row.names = FALSE
 )
 saveRDS(selected_models, file.path(output_dir, "selected_emsrr_models.rds"))
+
+saveRDS(
+  partial_effects_by_substock,
+  file.path(output_dir, "partial_effects.rds")
+)
 
 print(selection_summary)
 print(holdout_metrics)
