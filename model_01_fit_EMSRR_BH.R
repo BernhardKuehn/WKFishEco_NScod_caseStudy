@@ -16,6 +16,7 @@
 
 rm(list = ls())
 library(earth)
+library(collapse)
 
 # -------------------------- #
 # Configuration
@@ -72,10 +73,36 @@ dat$substock <- as.character(dat$substock)
 
 source("./functions/calc.partial.effects.R")
 
+# define bounds for the BH parameter search
+get_bh_bounds <- function(substock, rec, ssb) {
+  bounds <- bh_bounds_by_substock[[substock]]
+  
+  # Fallbacks preserve the former lower bound for b and add broad finite
+  # upper limits so BOBYQA can work in a bounded parameter space.
+  if (is.null(bounds)) {
+    bounds <- list(
+      a = c(max(rec) * (1 + 1e-6), bh_upper_factor * max(rec)),
+      b = c(0.01 * min(ssb), bh_upper_factor * max(ssb))
+    )
+  }
+  
+  for (parameter in c("a", "b")) {
+    limit <- bounds[[parameter]]
+    if (length(limit) != 2L || any(!is.finite(limit)) ||
+        any(limit <= 0) || limit[1] >= limit[2]) {
+      stop("Invalid positive finite bounds for BH parameter ",
+           parameter, " in ", substock, ".")
+    }
+  }
+  
+  bounds
+}
+
+
 # Fit R = a * S / (S + b) by minimizing squared log-scale residuals.
 # For any fixed b, the minimizing log(a) has a closed-form solution, leaving
 # only a one-dimensional optimization over log(b).
-fit_bh <- function(rec, ssb) {
+fit_bh <- function(rec, ssb, bounds, n_starts = bh_n_starts) {
   keep <- is.finite(rec) & is.finite(ssb) & rec > 0 & ssb > 0
   rec <- rec[keep]
   ssb <- ssb[keep]
@@ -83,26 +110,85 @@ fit_bh <- function(rec, ssb) {
   if (length(rec) < 3L) {
     stop("At least three positive recruitment/SSB observations are required.")
   }
-  
-  log_b_bounds <- log(c(min(ssb) * 1e-6, max(ssb) * 1e6))
-  if (any(!is.finite(log_b_bounds)) ||
-      log_b_bounds[1] >= log_b_bounds[2]) {
-    stop("Could not construct finite Beverton-Holt parameter bounds.")
+  if (n_starts < 2L) {
+    stop("Use at least two BH starting points.")
   }
   
-  objective <- function(log_b) {
-    b <- exp(log_b)
-    log_ratio <- log(ssb) - log(ssb + b)
-    log_a <- mean(log(rec) - log_ratio)
-    sum((log(rec) - log_a - log_ratio)^2)
+  lower <- log(c(a = bounds$a[1], b = bounds$b[1]))
+  upper <- log(c(a = bounds$a[2], b = bounds$b[2]))
+  
+  # Optimize L1-loss on log-scale residuals, using log parameters to guarantee
+  # positive a and b.
+  objective <- function(log_par) {
+    log_pred <- log_par[1] + log(ssb) -
+      log(ssb + exp(log_par[2]))
+    sum(abs(log(rec) - log_pred))
   }
   
-  opt <- stats::optimize(objective, interval = log_b_bounds)
-  b <- exp(opt$minimum)
-  log_ratio <- log(ssb) - log(ssb + b)
-  a <- exp(mean(log(rec) - log_ratio))
+  # Cover the bounded log-parameter space with a small deterministic grid and
+  # include a data-informed start.
+  grid <- expand.grid(
+    log_a = seq(lower["a"], upper["a"], length.out = 3L),
+    log_b = seq(lower["b"], upper["b"], length.out = 3L)
+  )
+  starts <- as.matrix(grid)
+  data_start <- c(
+    log_a = log(min(bounds$a[2], max(bounds$a[1], 1.5 * max(rec)))),
+    log_b = log(min(bounds$b[2], max(bounds$b[1], median(ssb))))
+  )
+  starts <- rbind(starts, data_start)
+  starts <- unique(starts)
+  starts <- starts[seq_len(min(n_starts, nrow(starts))), , drop = FALSE]
   
-  list(a = a, b = b)
+  fits <- lapply(seq_len(nrow(starts)), function(i) {
+    tryCatch(
+      minqa::bobyqa(
+        par = starts[i, ],
+        fn = objective,
+        lower = lower,
+        upper = upper,
+        control = list(maxfun = bh_maxfun)
+      ),
+      error = function(e) NULL
+    )
+  })
+  
+  valid <- which(!vapply(fits, is.null, logical(1)))
+  valid <- valid[vapply(fits[valid], function(fit) {
+    is.finite(fit$fval) && all(is.finite(fit$par))
+  }, logical(1))]
+  
+  if (!length(valid)) {
+    stop("All bounded multistart BOBYQA fits failed.")
+  }
+  
+  converged <- valid[vapply(fits[valid], function(fit) {
+    isTRUE(fit$ierr == 0)
+  }, logical(1))]
+  
+  if (!length(converged)) {
+    warning("No BOBYQA start reported normal convergence; using the best ",
+            "finite solution.")
+    converged <- valid
+  }
+  
+  best_index <- converged[which.min(vapply(
+    fits[converged],
+    function(fit) fit$fval,
+    numeric(1)
+  ))]
+  best <- fits[[best_index]]
+  
+  list(
+    a = unname(exp(best$par[1])),
+    b = unname(exp(best$par[2])),
+    objective = best$fval,
+    convergence = best$ierr,
+    bounds = bounds,
+    n_starts = nrow(starts),
+    best_start = best_index,
+    optimizer = best
+  )
 }
 
 predict_bh <- function(model, ssb) {
@@ -162,6 +248,26 @@ predict_emsrr_model <- function(model.obj, newdata) {
   )
 }
 
+# ------------------------------ #
+# starting values for the BH-fit
+# ------------------------------ #
+
+bh_n_starts <- 10L
+bh_maxfun <- 500L
+bh_upper_factor <- 100
+
+# Optional: enter biologically justified bounds in the same units as rec and ssb.
+# Example structure:
+# bh_bounds_by_substock <- list(
+#   Southern = list(a = c(lower, upper), b = c(lower, upper)),
+#   Northwestern = list(a = c(lower, upper), b = c(lower, upper)),
+#   Viking = list(a = c(lower, upper), b = c(lower, upper))
+# )
+bh_bounds_by_substock <- list(
+  Southern = NULL,
+  Northwestern = NULL,
+  Viking = NULL
+)
 
 # -------------------------- #
 # Bootstrap selection
@@ -200,6 +306,17 @@ for (substock in expected_substocks) {
   
   holdout_years <- tail(available_years, holdout_n_years)
   first_holdout_year <- min(holdout_years)
+  
+  training_stock <- stock_by_year[
+    stock_by_year$year < first_holdout_year, ,
+    drop = FALSE
+  ]
+  bh_bounds <- get_bh_bounds(
+    substock = substock,
+    rec = training_stock$rec,
+    ssb = training_stock[[ssb_column]]
+  )
+  
   covariates <- sort(unique(stock_data$variable[
     !is.na(stock_data$variable) & nzchar(stock_data$variable)
   ]))
@@ -284,7 +401,8 @@ for (substock in expected_substocks) {
           
           bh_model <- fit_bh(
             rec = bootstrap_data$rec,
-            ssb = bootstrap_data[[ssb_column]]
+            ssb = bootstrap_data[[ssb_column]],
+            bounds = bh_bounds
           )
           fitted_baseline <- predict_bh(
             bh_model,
@@ -506,7 +624,8 @@ for (substock in expected_substocks) {
   final_fit <- tryCatch({
     bh_model <- fit_bh(
       rec = selected_training$rec,
-      ssb = selected_training[[ssb_column]]
+      ssb = selected_training[[ssb_column]],
+      bounds = bh_bounds
     )
     baseline <- predict_bh(bh_model, selected_training[[ssb_column]])
     log_residuals <- log(selected_training$rec) - log(baseline)
@@ -586,7 +705,8 @@ for (substock in expected_substocks) {
   ]
   baseline_fit <- fit_bh(
     rec = baseline_training$rec,
-    ssb = baseline_training[[ssb_column]]
+    ssb = baseline_training[[ssb_column]],
+    bounds = bh_bounds
   )
   
   emsrr_prediction <- predict_emsrr(
