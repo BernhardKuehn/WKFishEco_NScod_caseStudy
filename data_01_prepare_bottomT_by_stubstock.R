@@ -1,7 +1,9 @@
 # -------------------------------------------------------- #
 # Script to: 
-# - calculate yearly avg. of SST over the 3 substock areas
+# - calculate yearly avg. of bottomT over the 3 substock areas
 # -------------------------------------------------------- #
+
+rm(list = ls())
 
 library(raster)
 library(terra)
@@ -70,37 +72,37 @@ rects_substock$substock = ifelse(grepl("Northwestern",rects_substock$areaPopulat
 # -------------------------------------------------------------------------------------------------- #
 
 # ----------------------------------------- # 
-# load SST data and cut with substock areas
+# load bottomT data and cut with substock areas
 # ----------------------------------------- #
 
 # load
-sst = rast("./data/Env/processed/AHOI_SST_raster_1945_2024.tif")
+bottomT = rast("./data/Env/processed/AHOI_BottomTemp_raster_1945_2024.tif")
 
 # extract time
-time_sst = as.Date(time(sst))
+time_bottomT = as.Date(time(bottomT))
 
 # convert subareas to vector in terra package
 areas_v <- terra::project(
   terra::vect(rects_substock[,"substock",drop = F]),
-  terra::crs(sst)
+  terra::crs(bottomT)
 )
 
 # unique substocks
 substock_regions <- unique(areas_v$substock)
 
 # crop by substock
-sst_by_substock <- setNames(lapply(substock_regions, function(r) {
+bottomT_by_substock <- setNames(lapply(substock_regions, function(r) {
   region_polygon <- areas_v[areas_v$substock == r, ,drop =F]
-  terra::crop(sst, region_polygon, mask = TRUE)
+  terra::crop(bottomT, region_polygon, mask = TRUE)
 }), substock_regions)
 
 
 par(mfrow = c(1,3))
-image(sst_by_substock$Southern,main = "Southern")
+image(bottomT_by_substock$Southern,main = "Southern")
 maps::map(add =T)
-image(sst_by_substock$Northwestern,main = "Northwestern")
+image(bottomT_by_substock$Northwestern,main = "Northwestern")
 maps::map(add =T)
-image(sst_by_substock$Viking,main = "Viking")
+image(bottomT_by_substock$Viking,main = "Viking")
 maps::map(add =T)
 
 # -------------------------------------- #
@@ -108,37 +110,37 @@ maps::map(add =T)
 # -------------------------------------- #
 
 # avg. over the year
-sst_yr_by_substock = lapply(sst_by_substock,function(x){
-    calc.mean.over.Month(x,time = time_sst,month = 1:12,shiftYear = F)
+bottomT_yr_by_substock = lapply(bottomT_by_substock,function(x){
+    calc.mean.over.Month(x,time = time_bottomT,month = 1:12,shiftYear = F)
 })
 
 # avg. over the subareas
-sst_yr_by_substock_ts = lapply(1:length(sst_yr_by_substock),function(i){
-  x = sst_yr_by_substock[[i]]
+bottomT_yr_by_substock_ts = lapply(1:length(bottomT_yr_by_substock),function(i){
+  x = bottomT_yr_by_substock[[i]]
   time = as.numeric(names(x))
   tmp = brick(x)
   ts = cellStats(tmp,mean)
   df = data.frame(year = time,ts = ts)
-  names(df)[2] = paste("SST",names(sst_yr_by_substock)[i],sep = "_")
+  names(df)[2] = paste("bottomT",names(bottomT_yr_by_substock)[i],sep = "_")
   return(df)
 })
 
 # join
 yr = data.frame(year = 1945:2024)
-sst_substk = mult.merge("yr","sst_yr_by_substock_ts",by = "year")
+bottomT_substk = mult.merge("yr","bottomT_yr_by_substock_ts",by = "year")
 
 # check difference
 par(mfrow = c(2,1))
-plot(sst_substk$year,sst_substk$SST_Southern,type = "l",col = "aquamarine4",ylim = c(8,14))
-lines(sst_substk$year,sst_substk$SST_Northwestern,col = "red")
-lines(sst_substk$year,sst_substk$SST_Viking,col = "blue")
+plot(bottomT_substk$year,bottomT_substk$bottomT_Southern,type = "l",col = "aquamarine4",ylim = c(8,14))
+lines(bottomT_substk$year,bottomT_substk$bottomT_Northwestern,col = "red")
+lines(bottomT_substk$year,bottomT_substk$bottomT_Viking,col = "blue")
 
-plot(sst_substk$year,scale(sst_substk$SST_Southern),type = "l",col = "aquamarine4")
-lines(sst_substk$year,scale(sst_substk$SST_Northwestern),col = "red")
-lines(sst_substk$year,scale(sst_substk$SST_Viking),col = "blue")
+plot(bottomT_substk$year,scale(bottomT_substk$bottomT_Southern),type = "l",col = "aquamarine4")
+lines(bottomT_substk$year,scale(bottomT_substk$bottomT_Northwestern),col = "red")
+lines(bottomT_substk$year,scale(bottomT_substk$bottomT_Viking),col = "blue")
 
-cor(sst_substk)
-# differences are marginal, correlations all above 0.77
+cor(bottomT_substk)
+# differences are marginal, correlations all above ~ 0.8
 
 # # ---------------------------------------- #
 # # alternative: 
@@ -147,23 +149,23 @@ cor(sst_substk)
 # 
 # library(fast.EOT)
 # 
-# EOTs_sst_yr_by_substock = lapply(sst_yr_by_substock,function(x)
+# EOTs_bottomT_yr_by_substock = lapply(bottomT_yr_by_substock,function(x)
 #                                  fast.EOT::fast.eot(x = brick(x),n = 10,
 #                                    standardised = T,
 #                                    n_cores = 8,verbose = T))
 # 
 # # check the different EOTs per subarea
-# lapply(EOTs_sst_yr_by_substock,function(x) plot_eot(x,n = 10))
+# lapply(EOTs_bottomT_yr_by_substock,function(x) plot_eot(x,n = 10))
 # 
 # # extract temporal pattern
 # 
-# eots_ts_out = lapply(names(EOTs_sst_yr_by_substock),
+# eots_ts_out = lapply(names(EOTs_bottomT_yr_by_substock),
 #        function(x){
-#          eot_out = EOTs_sst_yr_by_substock[[x]]
+#          eot_out = EOTs_bottomT_yr_by_substock[[x]]
 #          eot_ts = as.data.frame(sapply(eot_out, function(x) x@eot))
-#          names(eot_ts) = paste("SST",x,names(eot_ts),sep = "_")
+#          names(eot_ts) = paste("bottomT",x,names(eot_ts),sep = "_")
 #          # add yrs 
-#          eot_ts = data.frame(year = as.numeric(names(sst_yr_by_substock[[x]])),
+#          eot_ts = data.frame(year = as.numeric(names(bottomT_yr_by_substock[[x]])),
 #                              eot_ts)
 #          return(eot_ts)
 #        })
@@ -174,7 +176,7 @@ cor(sst_substk)
 # # lines(scale(eot_ts[,i]))
 # 
 # # join
-# eots_sst_substk = mult.merge("yr","eots_ts_out",by = "year")
+# eots_bottomT_substk = mult.merge("yr","eots_ts_out",by = "year")
 
 # --------------------------------------------- #
 # perform a clustering of similar ocean pattern
@@ -182,42 +184,42 @@ cor(sst_substk)
 
 source("functions/spatial_clustering.R")
 set.seed(42)
-sst_clusters <- lapply(
-  sst_yr_by_substock,
+bottomT_clusters <- lapply(
+  bottomT_yr_by_substock,
   spatial_kmeans,
   k_values = 2:10
 )
 
 # Selected k for each substock
-sapply(sst_clusters, `[[`, "selected_k")
+sapply(bottomT_clusters, `[[`, "selected_k")
 
-# Example selected map and area-weighted SST covariates
+# Example selected map and area-weighted bottomT covariates
 par(mfrow = c(1,3))
-for(i in 1:length(sst_clusters)){
-plot(sst_clusters[[i]]$selected$cluster_map)
+for(i in 1:length(bottomT_clusters)){
+plot(bottomT_clusters[[i]]$selected$cluster_map)
 maps::map(add = TRUE)
-title(names(sst_clusters)[i],adj =0)
+title(names(bottomT_clusters)[i],adj =0)
 }
 
-cluster_ts_out = lapply(1:length(sst_clusters),function(i){
-                        x = sst_clusters[[i]]
-                        substk = names(sst_clusters)[i]
+cluster_ts_out = lapply(1:length(bottomT_clusters),function(i){
+                        x = bottomT_clusters[[i]]
+                        substk = names(bottomT_clusters)[i]
                         tmp = as.data.frame(x$selected$timeseries)
                         tmp$time = as.numeric(gsub("X","",tmp$time))
                         names(tmp)[names(tmp) == "time"] <- "year"
                         #tmp$substock = substk
-                        names(tmp)[grep("Cluster",names(tmp))] = paste("SST",substk,
+                        names(tmp)[grep("Cluster",names(tmp))] = paste("bottomT",substk,
                                                                        names(tmp)[grep("Cluster",names(tmp))],sep = "_") 
                         return(tmp)
                         })
 
 # join
-cluster_sst_substk = mult.merge("yr","cluster_ts_out",by = "year")
+cluster_bottomT_substk = mult.merge("yr","cluster_ts_out",by = "year")
 
 # --------- #
 # write out
 # --------- #
 
-save(object = sst_substk,file = file.path("./data/Env/processed","SST_yr_by_cod_substock.rda"))
-#save(object = eots_sst_substk,file = file.path("./data/Env/processed","EOT_SST_yr_by_cod_substock.rda"))
-save(object = cluster_sst_substk,file = file.path("./data/Env/processed","Cluster_SST_yr_by_cod_substock.rda"))
+save(object = bottomT_substk,file = file.path("./data/Env/processed","bottomT_yr_by_cod_substock.rda"))
+#save(object = eots_bottomT_substk,file = file.path("./data/Env/processed","EOT_bottomT_yr_by_cod_substock.rda"))
+save(object = cluster_bottomT_substk,file = file.path("./data/Env/processed","Cluster_bottomT_yr_by_cod_substock.rda"))
