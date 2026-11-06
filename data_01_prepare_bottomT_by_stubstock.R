@@ -13,6 +13,8 @@ library(readxl)
 library(collapse)
 library(marmalaid)
 
+# set seed
+set.seed(42)
 
 # --------------------------------- #
 # get the substock area definitions
@@ -216,10 +218,24 @@ cluster_ts_out = lapply(1:length(bottomT_clusters),function(i){
 # join
 cluster_bottomT_substk = mult.merge("yr","cluster_ts_out",by = "year")
 
-# --------- #
-# write out
-# --------- #
+cluster_bottomT_substk_spatial = lapply(bottomT_clusters,function(x) x$selected$cluster_map)
+
+# ------------ #
+# write out ts
+# ------------ #
 
 save(object = bottomT_substk,file = file.path("./data/Env/processed","bottomT_yr_by_cod_substock.rda"))
 #save(object = eots_bottomT_substk,file = file.path("./data/Env/processed","EOT_bottomT_yr_by_cod_substock.rda"))
 save(object = cluster_bottomT_substk,file = file.path("./data/Env/processed","Cluster_bottomT_yr_by_cod_substock.rda"))
+
+# -------------------------- # 
+# write out the spatial data
+# -------------------------- #
+
+save(object = cluster_bottomT_substk_spatial,
+     file = file.path("./data/Env/processed","SpatialCluster_bottomT_yr_by_cod_substock.rda"))
+
+bottomT_yr_by_substock_spatial = bottomT_yr_by_substock
+save(object = bottomT_yr_by_substock_spatial,
+     file = file.path("./data/Env/processed","Spatial_bottomT_yr_by_cod_substock.rda"))
+
