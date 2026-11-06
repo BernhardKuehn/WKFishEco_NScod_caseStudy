@@ -16,8 +16,10 @@ library(stringr)
 
 # load SST
 load("./data/Env/processed/SST_yr_by_cod_substock.rda")
-# load SST EOTs
-load("./data/Env/processed/EOT_SST_yr_by_cod_substock.rda")
+# # load SST EOTs
+# load("./data/Env/processed/EOT_SST_yr_by_cod_substock.rda")
+# load clustering results
+load("./data/Env/processed/Cluster_SST_yr_by_cod_substock.rda")
 
 # load stock data
 tmp.nm = load("./data/stock/cod46a7d20_FLstockObjects_assessment_2026.Rdata")
@@ -58,23 +60,43 @@ cod_substks = do.call(rbind,cod_substks_lst)
 names(sst_substk)[grep("SST",names(sst_substk))] <- 
   gsub("SST","SST_mean",names(sst_substk)[grep("SST",names(sst_substk))])
 
-# join mean and EOTs
-eot_mean_sst_substk = merge(eots_sst_substk,sst_substk,by = "year")
+# # join mean and EOTs
+# eot_mean_sst_substk = merge(eots_sst_substk,sst_substk,by = "year")
+
+# join mean and clustering
+clustering_mean_sst_substk = merge(cluster_sst_substk,sst_substk,by = "year")
+
+
+# # lag SST
+# eot_mean_sst_substk_lag = eot_mean_sst_substk
+# eot_mean_sst_substk_lag[,-1] = apply(eot_mean_sst_substk[,-1],2,function(x) dplyr::lag(x,1))
+# # bring to long format
+# eot_mean_sst_substk_long = pivot(eot_mean_sst_substk_lag,ids = "year")
+# eot_mean_sst_substk_long$substock = str_extract(pattern = "Northwestern|Southern|Viking",
+#                                                 string = eot_mean_sst_substk_long$variable)
+# 
+# unique(cod_substks$substock)
+# unique(eot_mean_sst_substk_long$substock)
+# cod_substks$substock = ifelse(grepl("Northwest",cod_substks$substock),"Northwestern",
+#                               ifelse(grepl("South",cod_substks$substock),"Southern",cod_substks$substock))
+# env_stk = merge(cod_substks,eot_mean_sst_substk_long[,c("year","variable","value","substock")],by = c("year","substock"))
+# head(env_stk)
 
 # lag SST
-eot_mean_sst_substk_lag = eot_mean_sst_substk
-eot_mean_sst_substk_lag[,-1] = apply(eot_mean_sst_substk[,-1],2,function(x) dplyr::lag(x,1))
+clustering_mean_sst_substk_lag = clustering_mean_sst_substk
+clustering_mean_sst_substk_lag[,-1] = apply(clustering_mean_sst_substk[,-1],2,function(x) dplyr::lag(x,1))
 # bring to long format
-eot_mean_sst_substk_long = pivot(eot_mean_sst_substk_lag,ids = "year")
-eot_mean_sst_substk_long$substock = str_extract(pattern = "Northwestern|Southern|Viking",
-                                                string = eot_mean_sst_substk_long$variable)
+clustering_mean_sst_substk_long = pivot(clustering_mean_sst_substk_lag,ids = "year")
+clustering_mean_sst_substk_long$substock = str_extract(pattern = "Northwestern|Southern|Viking",
+                                                string = clustering_mean_sst_substk_long$variable)
 
 unique(cod_substks$substock)
-unique(eot_mean_sst_substk_long$substock)
+unique(clustering_mean_sst_substk_long$substock)
 cod_substks$substock = ifelse(grepl("Northwest",cod_substks$substock),"Northwestern",
                               ifelse(grepl("South",cod_substks$substock),"Southern",cod_substks$substock))
-env_stk = merge(cod_substks,eot_mean_sst_substk_long[,c("year","variable","value","substock")],by = c("year","substock"))
+env_stk = merge(cod_substks,clustering_mean_sst_substk_long[,c("year","variable","value","substock")],by = c("year","substock"))
 head(env_stk)
+
 
 
 # check relationship between recruitment and SST_lag1
