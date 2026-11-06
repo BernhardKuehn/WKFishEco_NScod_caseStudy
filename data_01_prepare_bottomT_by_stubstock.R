@@ -218,7 +218,11 @@ cluster_ts_out = lapply(1:length(bottomT_clusters),function(i){
 # join
 cluster_bottomT_substk = mult.merge("yr","cluster_ts_out",by = "year")
 
-cluster_bottomT_substk_spatial = lapply(bottomT_clusters,function(x) x$selected$cluster_map)
+cluster_bottomT_substk_spatial = lapply(bottomT_clusters, function(x) {
+  map = x$selected$cluster_map
+  if (!raster::inMemory(map)) map = raster::readAll(map)
+  map
+})
 
 # ------------ #
 # write out ts
@@ -235,7 +239,12 @@ save(object = cluster_bottomT_substk,file = file.path("./data/Env/processed","Cl
 save(object = cluster_bottomT_substk_spatial,
      file = file.path("./data/Env/processed","SpatialCluster_bottomT_yr_by_cod_substock.rda"))
 
-bottomT_yr_by_substock_spatial = bottomT_yr_by_substock
+# SpatRaster external pointers do not survive save()/load(); store the
+# annual fields as in-memory RasterBricks so the spatial product is portable.
+bottomT_yr_by_substock_spatial = lapply(bottomT_yr_by_substock, function(x) {
+  x = raster::brick(x)
+  if (!raster::inMemory(x)) x = raster::readAll(x)
+  x
+})
 save(object = bottomT_yr_by_substock_spatial,
      file = file.path("./data/Env/processed","Spatial_bottomT_yr_by_cod_substock.rda"))
-

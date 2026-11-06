@@ -1,541 +1,410 @@
 # ================================================================================ #
-# Prepare projections of env. signals for their use in the reference pt estimation
-# author: Bernhard Kuehn
-# last change: 2026-11-06
-# =========================================================== # 
-
-# ------------------------------------------------------------------ #
-# steps: 
-# 1. load proj. fields
-# 2. load spatial-mean/clustered pattern or regions for spatial avg. 
-# 3. process proj. the same way that the historical fields have been processed
-# 4. project fields onto historical fields
-# 5. extract the relevant variables needed for the different stocks
-# 6. write out and store
-# ------------------------------------------------------------------ #
+# Prepare historical and projected bottom-temperature time series
+#
+# 1. Recalculate the historical substock means and cluster time series
+# 2. Compare these with the time series saved by data_01
+# 3. Find the cells shared by history and all RCP realizations
+# 4. Calculate annual means for the projected fields using the historical clusters
+# 5. Compare history and projections, including their overlapping years
+#
+# History and projections remain separate; no lag or splicing is applied here.
+# Run from the repository root after data_01, data_00.b and data_00.c.
+# ================================================================================ #
 
 rm(list = ls())
 
 library(raster)
 library(terra)
-library(marmalaid)
-library(stringr)
-library(DescTools)
-library(Rcpp)
-library(RcppArmadillo)
-library(RcppEigen)
-library(Rcpp2doParallel)
 
 # ---------------- #
 # helper functions
-# ---------------- # 
+# ---------------- #
 
-apply.rasterFunc.on.nestedList = function(x,fn){
-  lapply(x,function(xx){
-    if(is.list(xx)){
-      apply.rasterFunc.on.nestedList(xx,fn = fn)
-    } else if(class(xx) %in% c("RasterLayer","RasterBrick","RasterStack")){
-      fn(xx) # apply function on raster
-    } else if(!is.list(xx) && !(class(xx) %in% c("RasterLayer","RasterBrick","RasterStack"))) {
-      xx
+# Read the monthly dates stored in the projection raster or its layer names.
+get.proj.time = function(x,filename){
+  time.rst = terra::time(x)
+  if(length(time.rst) != nlyr(x) || anyNA(time.rst)){
+    time.names = gsub("\\.","-",sub("^X","",names(x)))
+    if(any(!grepl("^[0-9]{4}-[0-9]{2}-[0-9]{2}$",time.names))){
+      stop(filename,": no usable monthly dates in the raster.")
     }
-  })
+    time.rst = as.Date(time.names,format = "%Y-%m-%d")
+  } else {
+    time.rst = as.Date(time.rst)
+  }
+  if(anyNA(time.rst)) stop(filename,": invalid monthly dates.")
+  year = as.integer(format(time.rst,"%Y"))
+  month = as.integer(format(time.rst,"%m"))
+  month.index = year*12L + month
+  if(anyDuplicated(month.index) || any(diff(month.index) != 1L) ||
+     any(table(year) != 12L)){
+    stop(filename,": expected consecutive, complete years of monthly data.")
+  }
+  return(time.rst)
 }
 
-# # fast matrix multiplication in C++
-# cppFunction(depends = c("RcppArmadillo","RcppEigen"),
-#             'SEXP matMult_rcpp(Eigen::MatrixXd A, Eigen::MatrixXd B){
-#             Eigen::MatrixXd C = A * B;
-#             return Rcpp::wrap(C);
-#             }')
-
+# Apply the same spatial summaries to annual historical and projected values.
+# The substock mean is unweighted (as in data_01); cluster means use the
+# raster::area weights used by spatial_kmeans on the original cluster map.
+calc.substock.ts = function(fields,years,region.info,common = TRUE){
+  out = data.frame(year = years)
+  for(substk in names(region.info)){
+    info = region.info[[substk]]
+    cells = if(common) info$common else info$historical
+    vals = fields[[substk]]
+    out[[paste0("bottomT_",substk)]] =
+      colMeans(vals[cells,,drop = FALSE],na.rm = !common)
+    for(cluster in info$cluster.ids){
+      index = which(cells & !is.na(info$cluster) & info$cluster == cluster)
+      if(!length(index)) stop(substk,": no cells remain in Cluster",cluster)
+      weights = info$area[index]/sum(info$area[index])
+      out[[paste0("bottomT_",substk,"_Cluster",cluster)]] =
+        drop(crossprod(weights,vals[index,,drop = FALSE]))
+    }
+  }
+  return(out)
+}
 
 # ---------------------- #
 # load historical fields
 # ---------------------- #
 
-# load original fields
-load("./data/Env/processed/Spatial_bottomT_yr_by_cod_substock.rda")
+dir.hist = "./data/Env/processed"
+dir.proj = "./data/Env/POLCOMS-ERSEM_biasRM_BVARsims/bottomT"
+dir.out = "./data/Env/processed/bottomT_projections"
 
-# load stored clusters
-load("./data/Env/processed/SpatialCluster_bottomT_yr_by_cod_substock.rda")
+load(file.path(dir.hist,"Spatial_bottomT_yr_by_cod_substock.rda"))
+load(file.path(dir.hist,"SpatialCluster_bottomT_yr_by_cod_substock.rda"))
+load(file.path(dir.hist,"bottomT_yr_by_cod_substock.rda"))
+load(file.path(dir.hist,"Cluster_bottomT_yr_by_cod_substock.rda"))
 
+if(!is.list(bottomT_yr_by_substock_spatial) ||
+   !length(bottomT_yr_by_substock_spatial) ||
+   is.null(names(bottomT_yr_by_substock_spatial)) ||
+   any(!nzchar(names(bottomT_yr_by_substock_spatial))) ||
+   anyDuplicated(names(bottomT_yr_by_substock_spatial)) ||
+   !is.list(cluster_bottomT_substk_spatial) ||
+   is.null(names(cluster_bottomT_substk_spatial)) ||
+   anyDuplicated(names(cluster_bottomT_substk_spatial)) ||
+   !setequal(names(bottomT_yr_by_substock_spatial),names(cluster_bottomT_substk_spatial))){
+  stop("Historical fields and cluster maps must have the same unique substock names.")
+}
+if(!is.data.frame(bottomT_substk) || !is.data.frame(cluster_bottomT_substk) ||
+   !"year" %in% names(bottomT_substk) || !"year" %in% names(cluster_bottomT_substk) ||
+   anyNA(bottomT_substk$year) || anyNA(cluster_bottomT_substk$year) ||
+   anyDuplicated(bottomT_substk$year) || anyDuplicated(cluster_bottomT_substk$year)){
+  stop("Saved historical time series must have unique, non-missing years.")
+}
 
-env.hist.dat = list(bottomT = bottomT_yr_by_substock_spatial)
-
-# ------------------------------------------------ #
-# read in BVAR-generated files and perform overlay
-# ------------------------------------------------ #
-
-dir.proj = "./data/Env/POLCOMS-ERSEM_biasRM_BVARsims/"
-
-# load a file from each subdirectory
-sub.dir.proj = list.files(dir.proj)
-
-# in order for this to work the folder names should match the historical file names
-if(!all(names(env.hist.dat) %in% sub.dir.proj)){
-  stop("Please make sure that the filenames match the list names, otherwise correct matching cannot be quaranted!")
-} else {
-  # continue from here and perform overlay
-  
-  # --------------------- #
-  # generate overlay mask
-  # --------------------- #
-  extent_min_list = list()
-  overlay.masks = list()
-  for(i in seq(sub.dir.proj)){
-    tmp.dir = file.path(dir.proj,sub.dir.proj[i])
-    tmp = rast(file.path(tmp.dir,list.files(tmp.dir)[1]))
-    
-    # match
-    var = sub.dir.proj[i]
-    
-    # eof?
-    if(class(env.hist.dat[[var]]) == "list"){
-      hist = sum(!is.na(brick(env.hist.dat[[var]][[1]])))
-    } else{
-      hist = sum(!is.na(brick(env.hist.dat[[var]])))
-    }
-    proj = brick(sum(!is.na(tmp)))
-    
-    # cut to same extent
-    xy_min.max = rbind(as.vector(extent(hist)),as.vector(extent(proj)))
-    extent_min = extent(c(max(xy_min.max[,1]),
-                          min(xy_min.max[,2]),
-                          max(xy_min.max[,3]),
-                          min(xy_min.max[,4])))
-    # store the extent_min for latter use
-    extent_min_list[[i]] = extent_min
-    names(extent_min_list)[i] = var
-    # crop
-    hist = crop(hist,extent_min)
-    proj = crop(proj,extent_min)
-    
-    # create overlay 
-    over.hist.proj = overlay(x = hist,
-                             y = proj,fun = sum)
-    mask.hist.proj = over.hist.proj !=cellStats(over.hist.proj,max)
-    
-    # store mask
-    overlay.masks[[i]] = mask.hist.proj
-    names(overlay.masks)[i] = var
-  }
-  par(mfrow = c(2,2),mar = c(1,1,2,1))
-  lapply(overlay.masks,image)
-  
-  # -------------------------------- #
-  # process env. fields through mask
-  # -------------------------------- #
-  
-  #env.hist.dat_season_mask = env.hist.dat_season
-  env.hist.dat_mask = env.hist.dat
-  for(i in seq(env.hist.dat)){
-    hist = env.hist.dat[[i]]
-    var = names(env.hist.dat)[i]
-    print(var)
-    # get corresponding overlay mask
-    mask.o = overlay.masks[[var]]
-    if(class(hist) == "list"){
-      tmp.out = apply.rasterFunc.on.nestedList(hist,
-                                               fn = function(x) mask(crop(x,extent(mask.o)),mask = mask.o,
-                                                                     maskvalue = 1,inverse = F))
-    } else {
-      tmp.out = mask(crop(hist,extent(mask.o)),mask = mask.o,
-                     maskvalue = 1,inverse = F)
-    }
-    
-    # store 
-    env.hist.dat_mask[[i]] = tmp.out
-  }
-  
-  # -------------- #
-  # calc anomalies
-  # -------------- #
-  
-  env.hist.dat_anom = lapply(env.hist.dat_mask,function(x){
-    rst.anom = list()
-    if(class(x) == "list"){
-      time.rst = as.Date(sub("X","",names(x[[1]])),format = "%Y.%m.%d")
-      rst.anom = lapply(x, function(xx)
-        fieldAnomaly.raster(rst1 = xx,
-                            time = time.rst,level = "month"))
-    } else {
-      time.rst = as.Date(sub("X","",names(x)),format = "%Y.%m.%d")
-      rst.anom = fieldAnomaly.raster(rst1 = x,
-                                     time = time.rst,level = "month")
-      
-    }
-    return(rst.anom)
+# Store the historical values, cluster IDs and cell areas in the same order.
+# A cluster map includes only cells with a complete historical time series.
+region.info = hist.fields = list()
+hist.extents = list()
+years.hist = NULL
+for(substk in names(bottomT_yr_by_substock_spatial)){
+  hist = tryCatch({
+    x = terra::rast(bottomT_yr_by_substock_spatial[[substk]])
+    nlyr(x)
+    x
+  },error = function(e){
+    stop(substk,": cannot restore historical raster (",conditionMessage(e),
+         "). Regenerate it with the updated data_01 script.",call. = FALSE)
   })
-  
-  
-  # ----------------------- #
-  # calculate seasonal avg.
-  # ----------------------- #
-  
-  # apply on list
-  env.hist.dat_season_mask = lapply(env.hist.dat_anom,
-                               fn_seasonal,ss = seasons)
-  
-  
-  # ------------------------- #
-  # calculate historical EOFs
-  # ------------------------- #
-  
-  env.hist_eofs = list()
-  for(i in seq(env.hist.dat_season_mask)){
-    tmp = env.hist.dat_season_mask[[i]]
-    var = names(env.hist.dat_season_mask)[i]
-    if(var == "currents"){
-      # since currents enters the spatial.PCA function as list-obj,
-      # the 'apply.raster.on.nested.list' function does not work here
-      out = list()
-      for(j in seq(tmp)){
-        out[[j]] = spatial.PCA(x = tmp[[j]],center = T,scale. = F,
-                    spatial.extent = extent(tmp[[j]][[1]]),plot = F)
-        names(out)[j] = names(tmp)[j]
-      }
-    } else{
-     out =  apply.rasterFunc.on.nestedList(tmp,
-                                     fn = function(x) spatial.PCA(x = x,center = T,scale. = F,
-                                                                  spatial.extent = extent(x),plot = F))
-      
-    }
-    env.hist_eofs[[i]] = out
-    names(env.hist_eofs)[i] = var
+  clusters = terra::rast(cluster_bottomT_substk_spatial[[substk]])
+  if(nlyr(clusters) != 1L ||
+     !isTRUE(terra::compareGeom(hist[[1]],clusters,crs = TRUE,ext = TRUE,
+                                 rowcol = TRUE,res = TRUE,stopOnError = FALSE))){
+    stop(substk,": historical field and cluster map do not share a grid.")
   }
-  
-  # ------------------------------------------------ #
-  # added on the 2023-11-30:
-  # check flip of PCs of the 'new' cropped version
-  # with the 'old' uncropped one
-  # ------------------------------------------------ #
-  vars = lut.eof.pattern$new
-  flip.vars = list()
-  for(vv in seq(vars)){
-  var = vars[vv]
-  old.var = lut.eof.pattern$old[lut.eof.pattern$new == var]
-  old.eofs = EOF.pattern$EOFs[[old.var]]
-  new.eofs = env.hist_eofs[[var]]
-  seasons.eofs = names(old.eofs)
-  flip.list = list()
-  for(z in 1:length(seasons.eofs)){
-    seas = seasons.eofs[z]
-    # check the first 9 PCs
-    pcs.old = old.eofs[[seas]]$sp.PCA$x[,1:10]
-    pcs.new = new.eofs[[seas]]$sp.PCA$x[,1:10]
-    par(mfrow = c(3,4),mar = c(2,2,4,2),oma = c(0,0,2,0))
-    
-    cors = vector()
-    for(pc in 1:10){
-      # calc correlations
-      check1 = pcs.old[,pc]
-      check2 = pcs.new[,pc]
-      if(length(check1) != length(check2)){
-      # simple cut the longer one
-      min.l = pmin(length(check1),length(check2))
-      check1 = check1[1:min.l]
-      check2 = check2[1:min.l]
-      }
-      cors[pc] = cor(check1,check2)
-      
-      plot(check1,type = "l")
-      lines(check2,col = "red")
-      title(paste0("PC",pc),adj = 0)
-    }
-    mtext(text = paste(var,seas,sep = "-"),side = 3,line = 0,outer = T,font = 2)
-    flip = cors<0.3
-    names(flip) = paste0("PC",1:10)
-    flip.list[[z]] = flip
-  }  
-  names(flip.list) = seasons.eofs
-  flip.vars[[vv]] = do.call(cbind,flip.list)
+  if(!isTRUE(terra::is.lonlat(hist))) stop(substk,": expected a longitude/latitude grid.")
+  year.names = sub("^X","",names(hist))
+  if(any(!grepl("^[0-9]{4}$",year.names))){
+    stop(substk,": historical raster layers must be named by year.")
   }
-  names(flip.vars) = vars 
-  # stored matrices showing which PCs are flipped 
-  # (need to be unflipped)
-  
-# ============================================== #
-# 2. Project MPIOM data onto historical EOFs
-# ============================================== #
-  
-# sub steps: 
-# - use anomalies of proj
-# - calc. seasonal avg
-# - mask with overlay mask
-# - project onto seasonal eofs, store only the first 10 pattern
-# nr. PCs 2 (proj) x 4 (vars) x 5 (seasons) x 10 (eofs) x 100 (realisations) = 4E5 time series
+  years = as.integer(year.names)
+  if(anyDuplicated(years) || is.unsorted(years,strictly = TRUE)){
+    stop(substk,": historical years must be unique and increasing.")
+  }
+  if(is.null(years.hist)) years.hist = years
+  if(!identical(years,years.hist)) stop(substk,": historical years differ among substocks.")
 
-# !!! this part is a bit slow...think about running in parallel !!!
-  
+  if(length(region.info)){
+    reference = terra::rast(region.info[[1]]$template)
+    same = terra::compareGeom(hist[[1]],reference,crs = TRUE,ext = FALSE,
+                              rowcol = FALSE,res = TRUE,stopOnError = FALSE)
+    offset = (terra::origin(hist)-terra::origin(reference))/terra::res(reference)
+    if(!isTRUE(same) || any(abs(offset-round(offset)) > 1e-6)){
+      stop(substk,": historical substocks do not share the same grid.")
+    }
+  }
+  values.hist = terra::values(hist,mat = TRUE)
+  cluster.ids = terra::values(clusters,mat = FALSE)
+  ids = sort(unique(cluster.ids[!is.na(cluster.ids)]))
+  if(!length(ids) || any(!is.finite(ids) | ids < 1 | ids != floor(ids))){
+    stop(substk,": cluster IDs must be positive integers.")
+  }
+  cell.area = raster::getValues(raster::area(raster::raster(hist[[1]])))
+  complete = rowSums(is.finite(values.hist)) == ncol(values.hist) &
+    is.finite(cell.area) & cell.area > 0
+  if(any(!is.na(cluster.ids) & !complete)){
+    stop(substk,": cluster map includes cells without complete historical data.")
+  }
+  region.info[[substk]] = list(historical = rowSums(is.finite(values.hist)) > 0,
+                               common = complete,cluster = cluster.ids,
+                               cluster.ids = ids,area = cell.area,
+                               xy = terra::xyFromCell(hist,seq_len(ncell(hist))),
+                               template = raster::raster(hist[[1]]))
+  hist.fields[[substk]] = values.hist
+  hist.extents[[substk]] = as.vector(terra::ext(hist))
+}
+
+# ---------------------------------------------------- #
+# recalculate and compare the historical time series
+# ---------------------------------------------------- #
+
+hist.saved = merge(bottomT_substk,cluster_bottomT_substk,by = "year",all = TRUE)
+hist.full = calc.substock.ts(hist.fields,years.hist,region.info,common = FALSE)
+variables = setdiff(names(hist.full),"year")
+if(!all(variables %in% names(hist.saved))){
+  stop("Saved historical time series are missing: ",
+       paste(setdiff(variables,names(hist.saved)),collapse = ", "))
+}
+
+# A full-footprint mismatch points to different inputs or processing in data_01.
+# The common-footprint comparison is added after finding the projection coverage.
+hist.comparison = lapply(variables,function(var){
+  years = sort(unique(c(hist.saved$year,hist.full$year)))
+  saved = hist.saved[[var]][match(years,hist.saved$year)]
+  full = hist.full[[var]][match(years,hist.full$year)]
+  data.frame(year = years,variable = var,saved = saved,recomputed_full = full,
+             full_minus_saved = full-saved)
+})
+hist.comparison = do.call(rbind,hist.comparison)
+if(any(!is.finite(hist.comparison$saved) | !is.finite(hist.comparison$recomputed_full))){
+  warning("Saved and recalculated historical values do not all match by year.")
+}
+if(any(abs(hist.comparison$full_minus_saved) > 1e-6,na.rm = TRUE)){
+  warning("Full-footprint historical values differ from the saved time series.")
+}
+
+# ------------------------------------------------------- #
+# find the footprint shared by history and both RCP runs
+# ------------------------------------------------------- #
+
+# Select and order the files written by data_00.c.
 clim.proj = c("rcp45","rcp85")
-# loop
-EOF.pattern_proj = vector("list",length(sub.dir.proj))
-names(EOF.pattern_proj) = sub.dir.proj
+if(!dir.exists(dir.proj)) stop("Missing projection directory: ",dir.proj)
+all.files = list.files(dir.proj,pattern = "\\.tiff?$",full.names = TRUE,ignore.case = TRUE)
+file.pattern = "^POLCOM_ERSEM_(rcp45|rcp85)_bottomT_([0-9]+)\\.tiff?$"
+if(any(!grepl(file.pattern,basename(all.files),ignore.case = TRUE))){
+  stop("Unexpected projection TIFF filename(s): ",
+       paste(basename(all.files[!grepl(file.pattern,basename(all.files),
+                                       ignore.case = TRUE)]),collapse = ", "))
+}
+proj.files = setNames(vector("list",length(clim.proj)),clim.proj)
+for(rcp in clim.proj){
+  files = all.files[grepl(paste0("^POLCOM_ERSEM_",rcp,"_bottomT_[0-9]+\\.tiff?$"),
+                          basename(all.files),ignore.case = TRUE)]
+  if(!length(files)) stop("No projection files found for ",rcp)
+  ids = as.integer(sub(file.pattern,"\\2",basename(files),ignore.case = TRUE))
+  if(anyNA(ids) || anyDuplicated(ids)) stop("Invalid or duplicate realization numbers for ",rcp)
+  proj.files[[rcp]] = setNames(files[order(ids)],as.character(sort(ids)))
+}
 
-
-# parallelize outer loop
-library(snow)
-library(doSNOW)
-library(foreach)
-
-cl = makeCluster(4,type = "SOCK")
-registerDoSNOW(cl)
-
-
-EOF.pattern_proj = foreach(i = seq(sub.dir.proj),.combine = c,.inorder = T,
-                           .packages = c("raster","terra","marmalaid","stringr","DescTools")) %dopar% {
-#for(i in seq(sub.dir.proj)){
-  var = sub.dir.proj[i]
-  EOF.pattern_proj = vector("list",1)
-  names(EOF.pattern_proj) = sub.dir.proj[i]
-  # get realisations
-  proj.files = list.files(file.path(dir.proj,sub.dir.proj[i]))
-  EOF.pattern_proj[[var]] = vector("list",length(clim.proj))
-  names(EOF.pattern_proj[[var]]) = clim.proj
-  for(rcp in clim.proj){
-    # get each climate projection seperately
-    proj.rcp.sub = proj.files[grep(rcp,proj.files)]
-    # order based on numbering
-    proj.rcp.sub = proj.rcp.sub[order(as.numeric(gsub("_","",str_extract(proj.rcp.sub,"_[0-9]+"))))]
-    # remove auxiliary files (aux.xml)
-    proj.rcp.sub = proj.rcp.sub[!grepl("xml",proj.rcp.sub)]
-    # read in and calculate seasonal avg. 
-    if(var == "currents"){
-      n.iters = length(proj.rcp.sub)/2
-      # split proj.rcp.sub
-      u.runs = grep(".u",proj.rcp.sub,value = T)
-      v.runs = grep(".v",proj.rcp.sub,value = T)
-      #uv.runs = list(u = u.runs,v = v.runs)
-      } else{
-      n.iters = length(proj.rcp.sub)
-      }
-    store.list = vector("list",length = length(seasons))
-    
-    for(it in 1:n.iters){
-      # do all the calculations in terra and only swith for the seasonal 
-      # calculations to raster, cos otherwise it is too slow.... 
-      if(var == "currents"){
-        
-        tmp.rst = lapply(list(u = u.runs[it],v = v.runs[it]),
-                        function(x) rast(file.path(dir.proj,var,x)))
-        time.rst = as.Date(sub("X","",names(tmp.rst[[1]])),format = "%Y.%m.%d")
-        # crop
-        tmp.rst = lapply(tmp.rst,function(x) crop(x,extent_min_list[[var]]))
-        # mask with overlay
-        tmp.rst = lapply(tmp.rst,function(x) mask(x,mask = rast(overlay.masks[[var]]),
-                       maskvalue = 1))
-        # calc anomalies
-        for(ll in 1:length(tmp.rst)){
-          tmp.rst[[ll]] = fieldAnomaly.raster(rst1 = tmp.rst[[ll]],
-                                        rst2.anomalies = env.hist.dat_anom[[var]][[ll]],
-                                        time = time.rst,level = "month")
-        }
-        # calculate seasonal means
-        #tmp.rst = lapply(tmp.rst,brick)
-        tmp.rst_seasonal = fn_seasonal(tmp.rst,ss = seasons)
-      } else {
-        tmp.rst = rast(file.path(dir.proj,var,proj.rcp.sub[it]))
-        time.rst = as.Date(sub("X","",names(tmp.rst)),format = "%Y.%m.%d")
-        # crop
-        tmp.rst = crop(tmp.rst,extent_min_list[[var]])
-        # mask with overlay
-        tmp.rst = mask(tmp.rst,mask = rast(overlay.masks[[var]]),
-                     maskvalue = 1)
-        # !!! calculate anomalies!!!!
-        # using the means of the historical period (added additional functionality in the marmalaid pkg)
-        tmp.rst = fieldAnomaly.raster(rst1 = tmp.rst,
-                          rst2.anomalies = env.hist.dat_anom[[var]],
-                          time = time.rst,level = "month")
-      
-      # calculate seasonal means
-      #tmp.rst = brick(tmp.rst)
-      tmp.rst_seasonal = fn_seasonal(tmp.rst,ss = seasons)
-      }
-      # project onto historical eofs
-      for(ss in 1:length(seasons)){
-        cat(var,"|",rcp,"|",names(seasons)[ss],"|",it,"\n")
-        #time.hist = env.hist_eofs[[var]][[names(seasons)[ss]]]$time
-        tmp.eof = env.hist_eofs[[var]][[names(seasons)[ss]]]$sp.PCA
-        if(var == "currents"){
-        input = lapply(tmp.rst_seasonal[[names(seasons)[ss]]],
-                 function(x){
-                   mat = as.matrix(x)
-                   mat = mat[complete.cases(mat),]
-                   return(mat)
-                 })
-        input = t(do.call(rbind,input))
-          
-        } else {
-          input = as.matrix(tmp.rst_seasonal[[names(seasons)[ss]]])
-          input = input[complete.cases(input),]
-          input = t(input)
-        }
-        # get PCs and select only the first 10
-        tmp.pcs = predict(tmp.eof,input)[,1:10]
-        # ------------------- #
-        # added on 2023-11-30: 
-        # correct flipped PCs
-        # ------------------- #
-        
-        # flip PCs if necessary: 
-        flip.multiplier = ifelse(flip.vars[[var]][,names(seasons)[ss]] == FALSE,1,-1)
-        tmp.pcs = t(t(tmp.pcs) * flip.multiplier)
-        
-        #time.proj = as.numeric(sub("X","",rownames(tmp.pcs)))
-        # # compare
-        # par(mfrow = c(3,3),mar = c(2,2,3,2))
-        # for(kk in 1:9){
-        #   plot(time.hist,tmp.eof$x[,kk],type= "l",xlim = c(min(time.eof),2100))
-        #   lines(time.proj,tmp.pcs[,kk],col = "red")
-        # }
-        
-        # store in array of form [time,PC,realisation]
-        if(it == 1){
-          store.list[[ss]] = tmp.pcs
-        } else {
-          store.list[[ss]] = Abind(store.list[[ss]],tmp.pcs,along = 3)
-        }
-      }
-      names(store.list) = names(seasons)
+# Scan every realization. Retain only cells with complete historical data
+# and finite values in every projection month, in both scenarios.
+xy.ext = do.call(rbind,hist.extents)
+hist.bounds = terra::ext(min(xy.ext[,1]),max(xy.ext[,2]),
+                         min(xy.ext[,3]),max(xy.ext[,4]))
+reference = terra::rast(region.info[[1]]$template)
+months.rcp = list()
+for(rcp in clim.proj){
+  for(it in names(proj.files[[rcp]])){
+    filename = proj.files[[rcp]][[it]]
+    cat("Checking footprint:",basename(filename),"\n")
+    proj = terra::rast(filename)
+    same = terra::compareGeom(proj[[1]],reference,crs = TRUE,ext = FALSE,
+                              rowcol = FALSE,res = TRUE,stopOnError = FALSE)
+    offset = (terra::origin(proj)-terra::origin(reference))/terra::res(reference)
+    if(!isTRUE(same) || any(abs(offset-round(offset)) > 1e-6)){
+      stop(filename,": CRS, resolution or grid origin differs from history.")
     }
-    EOF.pattern_proj[[var]][[rcp]] = store.list
-  } 
-  # pass element to the outer loop of the parallelisation routine
-  EOF.pattern_proj
-}
-stopCluster(cl)
-# check the different realisations 
-
-par(mfrow = c(3,3))
-for(pc in 1:9){
-plot(env.hist_eofs$bottomT$DJF$time,
-     env.hist_eofs$bottomT$DJF$sp.PCA$x[,pc],lwd = 2,
-     type ="l",xlim = c(1950,2100),ylim = c(-100,100))
-# add old PC  
-lines(EOF.pattern$EOFs$bottomT$DJF$time,
-      EOF.pattern$EOFs$bottomT$DJF$sp.PCA$x[,pc],lwd = 2,col ="limegreen",lty = 2)
-  
-time.proj = as.numeric(sub("X","",rownames(EOF.pattern_proj$bottomT$rcp45[[1]])))
-for(i in 1:100)
-lines(time.proj,EOF.pattern_proj$bottomT$rcp45[[1]][,pc,i],col = "red")
-}
-
-
-par(mfrow = c(3,3),oma = c(0,0,1,0),mar = c(1,1,1,1))
-for(pc in 1:9){
-  plot(env.hist_eofs$bottomT$DJF$time,
-       env.hist_eofs$bottomT$DJF$sp.PCA$x[,pc],lwd = 2,
-       type ="l",xlim = c(1950,2100),ylim = 2*range(env.hist_eofs$bottomT$DJF$sp.PCA$x[,pc]))
-  # add original EOF-pattern
-  lines(EOF.pattern$EOFs$bottomT$DJF$time,EOF.pattern$EOFs$bottomT$DJF$sp.PCA$x[,pc],col = "deeppink")
-  
-  time.proj = as.numeric(sub("X","",rownames(EOF.pattern_proj$bottomT$rcp85[[1]])))
-  for(i in 1:100){
-    lines(time.proj,EOF.pattern_proj$bottomT$rcp45[[1]][,pc,i],col = "olivedrab")
-    lines(time.proj,EOF.pattern_proj$bottomT$rcp85[[1]][,pc,i],col = "red")
+    time.proj = get.proj.time(proj,filename)
+    months = format(time.proj,"%Y-%m")
+    if(is.null(months.rcp[[rcp]])){
+      months.rcp[[rcp]] = months
+    } else if(!identical(months.rcp[[rcp]],months)){
+      stop(filename,": months differ among ",rcp," realizations.")
+    }
+    proj = terra::crop(proj,hist.bounds)
+    valid = terra::app(is.finite(proj),"sum") == nlyr(proj)
+    valid.values = terra::values(valid,mat = FALSE)
+    for(substk in names(region.info)){
+      index = terra::cellFromXY(valid,region.info[[substk]]$xy)
+      present = valid.values[index]
+      region.info[[substk]]$common = region.info[[substk]]$common &
+        !is.na(present) & present == 1
+    }
   }
-  # add mean trajectory
-  lines(time.proj,apply(EOF.pattern_proj$bottomT$rcp45$DJF[,pc,],1,mean),col = "turquoise",lwd = 2)
-  lines(time.proj,apply(EOF.pattern_proj$bottomT$rcp85$DJF[,pc,],1,mean),col = "tan1",lwd = 2)
-  lines(env.hist_eofs$bottomT$DJF$time,
-        env.hist_eofs$bottomT$DJF$sp.PCA$x[,pc],lwd = 2)
 }
-mtext("bottomT DJF",side = 3,line = -1,font = 2,outer = T)
 
-par(mfrow = c(3,3),oma = c(0,0,1,0))
-for(pc in 1:9){
-  plot(env.hist_eofs$currents$JJA$time,
-       env.hist_eofs$currents$JJA$sp.PCA$x[,pc],lwd = 2,
-       type ="l",xlim = c(1950,2100),ylim = c(-5,5))
-  # add original EOF-pattern
-  lines(EOF.pattern$EOFs$Currents$JJA$time,EOF.pattern$EOFs$Currents$JJA$sp.PCA$x[,pc],col = "deeppink")
-  
-  time.proj = as.numeric(sub("X","",rownames(EOF.pattern_proj$currents$rcp45[[3]])))
-  for(i in 1:100){
-    lines(time.proj,EOF.pattern_proj$currents$rcp45[[3]][,pc,i],col = "olivedrab")
-    lines(time.proj,EOF.pattern_proj$currents$rcp85[[3]][,pc,i],col = "red")
+# Report how much of each substock and cluster is retained.
+coverage = list()
+common.masks = list()
+for(substk in names(region.info)){
+  info = region.info[[substk]]
+  groups = c(list(mean = info$historical),
+             setNames(lapply(info$cluster.ids,function(id)
+               !is.na(info$cluster) & info$cluster == id),
+               paste0("Cluster",info$cluster.ids)))
+  for(group in names(groups)){
+    n.hist = sum(groups[[group]])
+    n.common = sum(groups[[group]] & info$common)
+    if(!n.common) stop(substk," ",group,": no cells on the common footprint.")
+    coverage[[length(coverage)+1L]] =
+      data.frame(substock = substk,group = group,historical_cells = n.hist,
+                 common_cells = n.common,retained_fraction = n.common/n.hist)
   }
-  lines(time.proj,apply(EOF.pattern_proj$currents$rcp45$JJA[,pc,],1,mean),col = "turquoise",lwd = 2)
-  lines(time.proj,apply(EOF.pattern_proj$currents$rcp85$JJA[,pc,],1,mean),col = "tan1",lwd = 2)
-  lines(env.hist_eofs$currents$JJA$time,
-        env.hist_eofs$currents$JJA$sp.PCA$x[,pc],lwd = 2)
+  common.masks[[substk]] =
+    raster::setValues(info$template,ifelse(info$common,1,NA_real_))
 }
-mtext("Currents JJA",side = 3,line = -1,font = 2,outer = T)
+coverage = do.call(rbind,coverage)
+print(coverage)
+if(any(coverage$retained_fraction < 1)){
+  warning("The common footprint excludes historical cells; inspect the coverage and comparison.")
+}
 
+# Recalculate history on that same footprint and compare with the saved series.
+hist.common = calc.substock.ts(hist.fields,years.hist,region.info)
+hist.comparison$recomputed_common = mapply(function(year,var){
+  hist.common[[var]][match(year,hist.common$year)]
+},hist.comparison$year,hist.comparison$variable)
+hist.comparison$common_minus_saved =
+  hist.comparison$recomputed_common-hist.comparison$saved
 
-par(mfrow = c(3,3),oma = c(0,0,1,0))
-for(pc in 1:9){
-  plot(env.hist_eofs$salt$DJF$time,
-       env.hist_eofs$salt$DJF$sp.PCA$x[,pc],lwd = 2,
-       type ="l",xlim = c(1950,2100),ylim = c(5*range(env.hist_eofs$salt$DJF$sp.PCA$x[,pc])))
-  # add original EOF-pattern
-  lines(EOF.pattern$EOFs$Salt$DJF$time,EOF.pattern$EOFs$Salt$DJF$sp.PCA$x[,pc],col = "deeppink")
-  
-  time.proj = as.numeric(sub("X","",rownames(EOF.pattern_proj$currents$rcp45[[3]])))
-  for(i in 1:100){
-    lines(time.proj,EOF.pattern_proj$salt$rcp45$DJF[,pc,i],col = "olivedrab")
-    lines(time.proj,EOF.pattern_proj$salt$rcp85$DJF[,pc,i],col = "red")
+# ------------------------------------------------------------ #
+# annual projected means using the historical areas and clusters
+# ------------------------------------------------------------ #
+
+bottomT.proj = setNames(vector("list",length(clim.proj)),clim.proj)
+for(rcp in clim.proj){
+  bottomT.proj[[rcp]] = setNames(vector("list",length(proj.files[[rcp]])),
+                                 names(proj.files[[rcp]]))
+  for(it in names(proj.files[[rcp]])){
+    filename = proj.files[[rcp]][[it]]
+    cat("Aggregating:",basename(filename),"\n")
+    proj = terra::crop(terra::rast(filename),hist.bounds)
+    time.proj = get.proj.time(proj,filename)
+    year.proj = as.integer(format(time.proj,"%Y"))
+
+    # Average the twelve monthly values per cell, as in data_01.
+    proj.yr = terra::tapp(proj,year.proj,"mean")
+    proj.values = terra::values(proj.yr,mat = TRUE)
+    proj.fields = lapply(region.info,function(info){
+      index = terra::cellFromXY(proj.yr,info$xy)
+      proj.values[index,,drop = FALSE]
+    })
+    for(substk in names(region.info)){
+      if(any(!is.finite(proj.fields[[substk]][region.info[[substk]]$common,,drop = FALSE]))){
+        stop(filename,": missing data on the common footprint for ",substk)
+      }
+    }
+    bottomT.proj[[rcp]][[it]] =
+      calc.substock.ts(proj.fields,sort(unique(year.proj)),region.info)
   }
-  lines(time.proj,apply(EOF.pattern_proj$salt$rcp45$DJF[,pc,],1,mean),col = "turquoise",lwd = 2)
-  lines(time.proj,apply(EOF.pattern_proj$salt$rcp85$DJF[,pc,],1,mean),col = "tan1",lwd = 2)
-  
-  lines(env.hist_eofs$salt$DJF$time,
-        env.hist_eofs$salt$DJF$sp.PCA$x[,pc],lwd = 2)
 }
-mtext("Salinity DJF",side = 3,line = -1,font = 2,outer = T)
 
+# ----------------------------------------------------- #
+# compare the historical and projected temporal patterns
+# ----------------------------------------------------- #
 
-par(mfrow = c(3,3),oma = c(0,0,1,0))
-for(pc in 1:9){
-  plot(env.hist_eofs$salt$YR$time,
-       env.hist_eofs$salt$YR$sp.PCA$x[,pc],lwd = 2,
-       type ="l",xlim = c(1950,2100),ylim = c(5*range(env.hist_eofs$salt$YR$sp.PCA$x[,pc])))
-  # add original EOF-pattern
-  lines(EOF.pattern$EOFs$Salt$YR$time,EOF.pattern$EOFs$Salt$YR$sp.PCA$x[,pc],col = "deeppink")
-  
-  time.proj = as.numeric(sub("X","",rownames(EOF.pattern_proj$currents$rcp45[[3]])))
-  for(i in 1:100){
-    lines(time.proj,EOF.pattern_proj$salt$rcp45$YR[,pc,i],col = "olivedrab")
-    lines(time.proj,EOF.pattern_proj$salt$rcp85$YR[,pc,i],col = "red")
+# Compare the median and 10-90% range of the realizations against history.
+# Bias correction does not imply that individual stochastic runs match history.
+overlap = list()
+for(rcp in clim.proj){
+  runs = bottomT.proj[[rcp]]
+  overlap.years = intersect(hist.common$year,runs[[1]]$year)
+  if(!length(overlap.years)){
+    warning("Historical and ",rcp," time series have no overlapping years.")
+    next
   }
-  lines(time.proj,apply(EOF.pattern_proj$salt$rcp45$YR[,pc,],1,mean),col = "turquoise",lwd = 2)
-  lines(time.proj,apply(EOF.pattern_proj$salt$rcp85$YR[,pc,],1,mean),col = "tan1",lwd = 2)
-  
-  lines(env.hist_eofs$salt$YR$time,
-        env.hist_eofs$salt$YR$sp.PCA$x[,pc],lwd = 2)
-}
-mtext("Salinity YR",side = 3,line = -1,font = 2,outer = T)
-
-
-par(mfrow = c(3,3),oma = c(0,0,1,0))
-for(pc in 1:9){
-  plot(env.hist_eofs$sst$YR$time,
-       env.hist_eofs$sst$YR$sp.PCA$x[,pc],lwd = 2,
-       type ="l",xlim = c(1950,2100),ylim = c(5*range(env.hist_eofs$sst$YR$sp.PCA$x[,pc])))
-  time.proj = as.numeric(sub("X","",rownames(EOF.pattern_proj$currents$rcp45[[3]])))
-  for(i in 1:100){
-    lines(time.proj,EOF.pattern_proj$sst$rcp45$YR[,pc,i],col = "olivedrab")
-    lines(time.proj,EOF.pattern_proj$sst$rcp85$YR[,pc,i],col = "red")
+  for(var in variables){
+    index = match(overlap.years,runs[[1]]$year)
+    values = matrix(vapply(runs,function(x) x[[var]][index],
+                           numeric(length(overlap.years))),nrow = length(overlap.years))
+    qs = t(apply(values,1,quantile,probs = c(0.1,0.5,0.9),names = FALSE))
+    observed = hist.common[[var]][match(overlap.years,hist.common$year)]
+    overlap[[length(overlap)+1L]] =
+      data.frame(scenario = rcp,variable = var,year = overlap.years,
+                 historical = observed,projection_p10 = qs[,1],
+                 projection_median = qs[,2],projection_p90 = qs[,3],
+                 median_minus_historical = qs[,2]-observed)
   }
-  lines(time.proj,apply(EOF.pattern_proj$sst$rcp45$YR[,pc,],1,mean),col = "turquoise",lwd = 2)
-  lines(time.proj,apply(EOF.pattern_proj$sst$rcp85$YR[,pc,],1,mean),col = "tan1",lwd = 2)
-  
-  lines(env.hist_eofs$sst$YR$time,
-       env.hist_eofs$sst$YR$sp.PCA$x[,pc],lwd = 2)
-  
 }
-mtext("SST YR",side = 3,line = -1,font = 2,outer = T)
-
-
-# !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-# implement better plotting with ggplot!!!
-# !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-
-# decide on an output format!!!!
-# just write out as it is (for the moment)
-save(EOF.pattern_proj,file = "./data/EOF.pattern_RCPproj_POLCOM.ERSEM_bottomT_sst_salt_currents_NS.RData")
-  
+if(length(overlap)){
+  overlap = do.call(rbind,overlap)
+} else {
+  overlap = data.frame(scenario = character(),variable = character(),year = integer(),
+                       historical = numeric(),projection_p10 = numeric(),
+                       projection_median = numeric(),projection_p90 = numeric(),
+                       median_minus_historical = numeric())
 }
 
+# Plot saved vs. recalculated history and the projections for every variable.
+if(!dir.exists(dir.out) && !dir.create(dir.out,recursive = TRUE)){
+  stop("Could not create output directory: ",dir.out)
+}
+pdf(file.path(dir.out,"historical_projection_comparison.pdf"),width = 13,height = 5)
+par(mfrow = c(1,2),mar = c(4,4,3,1))
+cols = c(rcp45 = "olivedrab",rcp85 = "red")
+for(var in variables){
+  check = hist.comparison[hist.comparison$variable == var,]
+  ylim.hist = range(c(check$saved,check$recomputed_full,check$recomputed_common),finite = TRUE)
+  plot(check$year,check$saved,type = "l",col = "grey40",lty = 2,
+       ylim = ylim.hist,xlab = "Year",ylab = "Annual bottom temperature",main = var)
+  lines(check$year,check$recomputed_full,col = "blue")
+  lines(check$year,check$recomputed_common,lwd = 2)
+  legend("topleft",c("Saved","Recalculated, full","Recalculated, common"),
+         col = c("grey40","blue","black"),lty = c(2,1,1),bty = "n",cex = 0.8)
 
+  ranges = lapply(bottomT.proj,function(runs){
+    years = runs[[1]]$year
+    values = matrix(vapply(runs,function(x) x[[var]],numeric(length(years))),
+                    nrow = length(years))
+    qs = t(apply(values,1,quantile,probs = c(0.1,0.5,0.9),names = FALSE))
+    data.frame(year = years,low = qs[,1],median = qs[,2],high = qs[,3])
+  })
+  xlim = range(c(hist.common$year,unlist(lapply(ranges,`[[`,"year"))))
+  ylim = range(c(hist.common[[var]],unlist(lapply(ranges,function(x) c(x$low,x$high)))),
+               finite = TRUE)
+  plot(hist.common$year,hist.common[[var]],type = "n",xlim = xlim,ylim = ylim,
+       xlab = "Year",ylab = "Annual bottom temperature",main = var)
+  for(rcp in clim.proj){
+    x = ranges[[rcp]]
+    polygon(c(x$year,rev(x$year)),c(x$low,rev(x$high)),border = NA,
+            col = adjustcolor(cols[rcp],alpha.f = 0.16))
+    lines(x$year,x$median,col = cols[rcp],lwd = 2)
+  }
+  lines(hist.common$year,hist.common[[var]],lwd = 2)
+  legend("topleft",c("History, common","RCP4.5 median (10-90%)",
+                     "RCP8.5 median (10-90%)"),
+         col = c("black",cols),lty = 1,lwd = 2,bty = "n",cex = 0.8)
+}
+dev.off()
+
+# ------------------- #
+# write out the data
+# ------------------- #
+
+# Each projected realization is an unlagged wide table with the same variable
+# names as the saved historical series. History and projections are not joined.
+bottomT_projection_results = list(historical_full = hist.full,
+                                  historical_common = hist.common,
+                                  historical_comparison = hist.comparison,
+                                  coverage = coverage,common_masks = common.masks,
+                                  projections = bottomT.proj,overlap = overlap,
+                                  projection_files = proj.files)
+saveRDS(bottomT_projection_results,file.path(dir.out,"bottomT_historical_projection_summaries.rds"))
+write.csv(hist.comparison,file.path(dir.out,"historical_comparison.csv"),row.names = FALSE)
+write.csv(coverage,file.path(dir.out,"common_footprint_coverage.csv"),row.names = FALSE)
+write.csv(overlap,file.path(dir.out,"historical_projection_overlap.csv"),row.names = FALSE)
