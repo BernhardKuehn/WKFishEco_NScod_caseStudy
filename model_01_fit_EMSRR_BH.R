@@ -9,7 +9,7 @@
 #   5. Fit the selected model on the training data and compare its holdout
 #      performance with a Beverton-Holt model using SSB only.
 #
-# Run from the repository root after data_02_join_SST_with_substock.R.
+# Run from the repository root after data_02_join_bottomT_with_substock.R.
 # Input:  ./data/Cod_Env_data.rda (object env_stk)
 # Output: ./results/model_01_fit_EMSRR/
 # ----------------------------------------------------------------------------- #
@@ -33,7 +33,7 @@ earth_pmethod <- "exhaustive"
 
 if (!file.exists(input_file)) {
   stop("Input data not found: ", input_file,
-       ". Run data_02_join_SST_with_substock.R first.")
+       ". Run data_02_join_bottomT_with_substock.R first.")
 }
 if (n_boot < 1L || holdout_n_years < 1L) {
   stop("n_boot and holdout_n_years must be positive.")
@@ -126,7 +126,7 @@ fit_bh <- function(rec, ssb, bounds, n_starts = bh_n_starts) {
   }
   
   # Data-informed center, following the FLR starting-value formulation.
-  a0 <- 2 * max(quantile(rec, 0.75, na.rm = TRUE))
+  a0 <- max(quantile(rec, 0.75, na.rm = TRUE))
   b0 <- a0 / max(quantile(rec / ssb, 0.90, na.rm = TRUE))
   
   # Keep the informed start and draw the remaining starts around it.
@@ -481,12 +481,12 @@ for (substock in expected_substocks) {
       bootstrap_rows <- do.call(rbind, bootstrap_rows)
       valid_forms <- which(bootstrap_rows$status == "ok")
       
-      # Lower OOB log-RMSE wins. If exactly tied, the first row (linpreds=FALSE)
-      # wins deterministically.
       if (length(valid_forms)) {
-        winner <- valid_forms[
-          which.min(bootstrap_rows$log_rmse[valid_forms])
-        ]
+        # Lowest OOB log-RMSE wins; exact ties favor linear.
+        winner <- valid_forms[order(
+          bootstrap_rows$log_rmse[valid_forms],
+          !bootstrap_rows$linpreds[valid_forms]
+        )[1]]
         bootstrap_rows$selected[winner] <- TRUE
       }
       
@@ -508,7 +508,7 @@ utils::write.csv(
   row.names = FALSE
 )
 
-baseline = candidate_metrics[grepl("SST_mean",candidate_metrics$variable) &
+baseline = candidate_metrics[grepl("bottomT_mean",candidate_metrics$variable) &
                   grepl("linear",candidate_metrics$model_form),] |> fgroup_by(substock,variable,model_form) |> 
                   fsummarise(log_rmse = median(log_rmse))
 
@@ -584,18 +584,29 @@ for (substock in expected_substocks) {
   } else if (mars_wins > linear_wins) {
     final_linpreds <- FALSE
   } else {
-    # Break a frequency tie by the lower median OOB error for the form.
-    selected_candidates <- substock_metrics[
+    # Compare OOB log-RMSE spread on bootstraps where both forms succeeded.
+    candidates <- substock_metrics[
       substock_metrics$variable == selected_variable &
-        substock_metrics$status == "ok", ,
+        substock_metrics$status == "ok" &
+        is.finite(substock_metrics$log_rmse), ,
       drop = FALSE
     ]
-    form_medians <- tapply(
-      selected_candidates$log_rmse,
-      selected_candidates$linpreds,
-      median
-    )
-    final_linpreds <- as.logical(names(which.min(form_medians)))
+    
+    linear <- candidates[candidates$linpreds, c("bootstrap", "log_rmse")]
+    mars <- candidates[!candidates$linpreds, c("bootstrap", "log_rmse")]
+    paired <- merge(linear, mars, by = "bootstrap",
+                    suffixes = c("_linear", "_mars"))
+    
+    if (nrow(paired) < 2L) {
+      warning("Too few paired bootstraps to compare spread for ",
+              substock, "; choosing linear.")
+      final_linpreds <- TRUE
+    } else {
+      linear_spread <- IQR(paired$log_rmse_linear)
+      mars_spread <- IQR(paired$log_rmse_mars)
+      # Lower IQR wins; equal spread favors linear.
+      final_linpreds <- linear_spread <= mars_spread
+    }
   }
   
   message("Selected for ", substock, ": ", selected_variable,
