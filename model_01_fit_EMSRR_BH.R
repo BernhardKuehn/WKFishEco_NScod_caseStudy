@@ -26,8 +26,8 @@ input_file <- "./data/Cod_Env_data.rda"
 output_dir <- "./results/model_01_fit_EMSRR"
 ssb_column <- "ssb_lag1"
 expected_substocks <- c("Southern", "Northwestern", "Viking")
-holdout_n_years <- 10L
-n_boot <- 100L
+holdout_n_years <- 10L # approximately a 75/25% split
+n_boot <- 1000L
 seed <- 2026L
 earth_pmethod <- "exhaustive"
 
@@ -122,23 +122,34 @@ fit_bh <- function(rec, ssb, bounds, n_starts = bh_n_starts) {
   objective <- function(log_par) {
     log_pred <- log_par[1] + log(ssb) -
       log(ssb + exp(log_par[2]))
-    sum(abs(log(rec) - log_pred))
+    sum(abs(log(rec) - log_pred)) # L1-loss
   }
   
-  # Cover the bounded log-parameter space with a small deterministic grid and
-  # include a data-informed start.
-  grid <- expand.grid(
-    log_a = seq(lower["a"], upper["a"], length.out = 3L),
-    log_b = seq(lower["b"], upper["b"], length.out = 3L)
+  # Data-informed center, following the FLR starting-value formulation.
+  a0 <- 2 * max(quantile(rec, 0.75, na.rm = TRUE))
+  b0 <- a0 / max(quantile(rec / ssb, 0.90, na.rm = TRUE))
+  
+  # Keep the informed start and draw the remaining starts around it.
+  starts_raw <- cbind(
+    a = abs(rnorm(n_starts - 1L, mean = a0, sd = 1.8 * a0)),
+    b = pmax(
+      bounds$b[1],
+      abs(rnorm(n_starts - 1L, mean = b0, sd = 1.8 * b0))
+    )
   )
-  starts <- as.matrix(grid)
-  data_start <- c(
-    log_a = log(min(bounds$a[2], max(bounds$a[1], 1.5 * max(rec)))),
-    log_b = log(min(bounds$b[2], max(bounds$b[1], median(ssb))))
+  starts_raw <- rbind(c(a = a0, b = b0), starts_raw)
+  
+  # Ensure every start lies within the same bounds used by BOBYQA.
+  starts_raw[, "a"] <- pmin(
+    bounds$a[2], pmax(bounds$a[1], starts_raw[, "a"])
   )
-  starts <- rbind(starts, data_start)
-  starts <- unique(starts)
-  starts <- starts[seq_len(min(n_starts, nrow(starts))), , drop = FALSE]
+  starts_raw[, "b"] <- pmin(
+    bounds$b[2], pmax(bounds$b[1], starts_raw[, "b"])
+  )
+  
+  # BOBYQA still optimizes log(a), log(b); the objective and bounds remain
+  # unchanged.
+  starts <- log(starts_raw)
   
   fits <- lapply(seq_len(nrow(starts)), function(i) {
     tryCatch(
@@ -217,7 +228,7 @@ fit_mars_residual <- function(log_residuals, covariate, linpreds) {
   earth::earth(
     log_residuals ~ x,
     data = data.frame(log_residuals = log_residuals, x = covariate),
-    linpreds = linpreds,
+    linpreds = linpreds, fast.k = 20, nprune = 20,
     pmethod = earth_pmethod
   )
 }
@@ -493,7 +504,7 @@ candidate_metrics <- do.call(rbind, candidate_rows)
 row.names(candidate_metrics) <- NULL
 utils::write.csv(
   candidate_metrics,
-  file.path(output_dir, "bootstrap_candidate_metrics.csv"),
+  file.path(output_dir, "BH_bootstrap_candidate_metrics.csv"),
   row.names = FALSE
 )
 
@@ -590,6 +601,31 @@ for (substock in expected_substocks) {
   message("Selected for ", substock, ": ", selected_variable,
           " (linpreds = ", final_linpreds, ")")
   
+  # Recompute the split and BH bounds for this substock.
+  stock_for_split <- unique(
+    dat[dat$substock == substock, c("year", "rec", ssb_column), drop = FALSE]
+  )
+  valid_stock <- is.finite(stock_for_split$year) &
+    is.finite(stock_for_split$rec) &
+    is.finite(stock_for_split[[ssb_column]]) &
+    stock_for_split$rec > 0 &
+    stock_for_split[[ssb_column]] > 0
+  stock_for_split <- stock_for_split[valid_stock, , drop = FALSE]
+  
+  available_years <- sort(unique(stock_for_split$year))
+  holdout_years <- tail(available_years, holdout_n_years)
+  first_holdout_year <- min(holdout_years)
+  
+  training_stock <- stock_for_split[
+    stock_for_split$year < first_holdout_year, , drop = FALSE
+  ]
+  bh_bounds <- get_bh_bounds(
+    substock = substock,
+    rec = training_stock$rec,
+    ssb = training_stock[[ssb_column]]
+  )
+  
+  
   # Fit final EMSRR using all usable training observations for this covariate.
   selected_data <- stock_data <- dat[
     dat$substock == substock & dat$variable == selected_variable,
@@ -657,15 +693,16 @@ for (substock in expected_substocks) {
   # Calculate and plot partial effects on training data only; the holdout remains
   # reserved for external performance evaluation.
   partial_x <- data.frame(
-    selected_training[[ssb_column]],
-    selected_training$value,
+    c(selected_training[[ssb_column]],selected_holdout[[ssb_column]]),
+    c(selected_training$value,selected_holdout$value),
     check.names = FALSE
   )
   names(partial_x) <- c(ssb_column, selected_variable)
   
   partial_effects <- calc.partial.effects(
     model.obj = final_fit,
-    y = selected_training$rec,
+    # use all data (train + holdout) for partial dependence
+    y = c(selected_training$rec,selected_holdout$rec),
     x = partial_x,
     predict.func = predict_emsrr_model
   )
@@ -676,7 +713,7 @@ for (substock in expected_substocks) {
   ggplot2::ggsave(
     filename = file.path(
       output_dir,
-      paste0("partial_effects_", substock, ".png")
+      paste0("BH_partial_effects_", substock, ".png")
     ),
     plot = partial_plot,
     width = 8,
@@ -720,6 +757,77 @@ for (substock in expected_substocks) {
     selected_holdout[[ssb_column]]
   )
   
+  # plot predictions
+  # Predictions on the same years used for the selected EMSRR.
+  plot_input <- rbind(selected_training, selected_holdout)
+  plot_input <- plot_input[order(plot_input$year), , drop = FALSE]
+  
+  plot_input$period <- ifelse(
+    plot_input$year < first_holdout_year, "History", "Holdout"
+  )
+  plot_input$period <- factor(plot_input$period, levels = c("History", "Holdout"))
+  
+  # Break lines at missing years and at the history/holdout boundary.
+  plot_input$segment <- cumsum(c(
+    TRUE,
+    diff(plot_input$year) != 1 |
+      plot_input$period[-1] != plot_input$period[-nrow(plot_input)]
+  ))
+  
+  emsrr_all <- predict_emsrr(
+    bh_model = final_fit$bh_model,
+    mars_model = final_fit$mars_model,
+    ssb = plot_input[[ssb_column]],
+    covariate = plot_input$value
+  )
+  bh_all <- predict_bh(baseline_fit, plot_input[[ssb_column]])
+  
+  plot_data <- rbind(
+    data.frame(plot_input[, c("year", "period", "segment")],
+               series = "Observed", recruitment = plot_input$rec),
+    data.frame(plot_input[, c("year", "period", "segment")],
+               series = "EMSRR", recruitment = emsrr_all),
+    data.frame(plot_input[, c("year", "period", "segment")],
+               series = "SSB-only BH", recruitment = bh_all)
+  )
+  plot_data$series <- factor(
+    plot_data$series, levels = c("Observed", "EMSRR", "SSB-only BH")
+  )
+  
+  recruitment_plot <- ggplot(plot_data, aes(x = year, y = recruitment)) +
+    annotate(
+      "rect",
+      xmin = first_holdout_year - 0.5, xmax = max(holdout_years) + 0.5,
+      ymin = -Inf, ymax = Inf, fill = "grey90"
+    ) +
+    geom_line(
+      aes(colour = series, linetype = period,
+          group = interaction(series, segment)),
+      linewidth = 0.8
+    ) +
+    geom_point(
+      data = plot_data[plot_data$series == "Observed", , drop = FALSE],
+      colour = "black", size = 1.5
+    ) +
+    geom_vline(xintercept = first_holdout_year - 0.5, colour = "grey50") +
+    scale_colour_manual(values = c(
+      "Observed" = "black", "EMSRR" = "#0072B2", "SSB-only BH" = "#D55E00"
+    )) +
+    scale_linetype_manual(values = c("History" = "solid", "Holdout" = "dashed")) +
+    labs(
+      title = paste("Recruitment:", substock),
+      subtitle = paste("Selected environmental covariate:", selected_variable),
+      x = "Year", y = "Recruitment",
+      colour = NULL, linetype = NULL
+    ) +
+    theme_bw()
+  
+  print(recruitment_plot)
+  ggsave(
+    filename = file.path(output_dir, paste0("BH_Prediction_rec_ts_", substock, ".png")),
+    plot = recruitment_plot, width = 9, height = 5, dpi = 300
+  )
+  
   observed <- selected_holdout$rec
   emsrr_score <- score_predictions(observed, emsrr_prediction)
   naive_score <- score_predictions(observed, naive_prediction)
@@ -758,24 +866,24 @@ holdout_predictions <- do.call(rbind, holdout_prediction_rows)
 
 utils::write.csv(
   selection_summary,
-  file.path(output_dir, "variable_selection_summary.csv"),
+  file.path(output_dir, "BH_variable_selection_summary.csv"),
   row.names = FALSE
 )
 utils::write.csv(
   holdout_metrics,
-  file.path(output_dir, "holdout_metrics.csv"),
+  file.path(output_dir, "BH_holdout_metrics.csv"),
   row.names = FALSE
 )
 utils::write.csv(
   holdout_predictions,
-  file.path(output_dir, "holdout_predictions.csv"),
+  file.path(output_dir, "BH_holdout_predictions.csv"),
   row.names = FALSE
 )
-saveRDS(selected_models, file.path(output_dir, "selected_emsrr_models.rds"))
+saveRDS(selected_models, file.path(output_dir, "BH_selected_emsrr_models.rds"))
 
 saveRDS(
   partial_effects_by_substock,
-  file.path(output_dir, "partial_effects.rds")
+  file.path(output_dir, "BH_partial_effects.rds")
 )
 
 print(selection_summary)
