@@ -1,15 +1,22 @@
-source("functions/prepare_bottomT_projections.R")
 stopifnot(requireNamespace("terra"), requireNamespace("raster"))
 
 test_bottomT_projections <- function() {
+  script <- normalizePath("data_00.d_Join_historical_and_projection_pattern.R")
+  original_dir <- getwd()
   root <- tempfile("bottomT-test-")
   dir.create(root)
-  on.exit(unlink(root, recursive = TRUE), add = TRUE)
-  processed <- file.path(root, "processed")
-  projections <- file.path(root, "projections")
-  output <- file.path(root, "output")
-  dir.create(processed)
-  dir.create(projections)
+  on.exit({setwd(original_dir); unlink(root, recursive = TRUE)}, add = TRUE)
+  processed <- file.path(root, "data/Env/processed")
+  projections <- file.path(root, "data/Env/POLCOMS-ERSEM_biasRM_BVARsims/bottomT")
+  output <- file.path(processed, "bottomT_projections")
+  dir.create(processed, recursive = TRUE)
+  dir.create(projections, recursive = TRUE)
+  setwd(root)
+  run_script <- function() {
+    env <- new.env(parent = globalenv())
+    source(script, local = env)
+    env
+  }
 
   h <- terra::rast(nrows = 2, ncols = 2, xmin = 0, xmax = 2,
                    ymin = 50, ymax = 52, crs = "EPSG:4326", nlyrs = 3)
@@ -59,11 +66,13 @@ test_bottomT_projections <- function() {
                                                          "_bottomT_", id, ".tiff")))
     }
   }
-  result <- prepare_bottomT_projections(processed, projections, output)
+  run <- run_script()
+  result <- run$bottomT_projection_results
   stopifnot(identical(names(result$projections$rcp45), c("1", "10")),
             identical(result$historical_common$year, 2006:2008),
             identical(result$projections$rcp45[["1"]]$year, 2007:2009),
             max(abs(result$historical_comparison$full_minus_saved)) < 1e-10,
+            any(abs(result$historical_comparison$common_minus_saved) > 0),
             result$coverage$common_cells[result$coverage$substock == "Southern" &
                                            result$coverage$group == "mean"] == 3,
             is.na(raster::getValues(result$common_masks$Southern)[1]),
@@ -94,38 +103,50 @@ test_bottomT_projections <- function() {
   cluster_bottomT_substk$bottomT_Southern_Cluster2 <-
     drop(crossprod(area[c(2, 4)] / sum(area[c(2, 4)]), vals[c(2, 4), ]))
   save(cluster_bottomT_substk, file = file.path(processed, "Cluster_bottomT_yr_by_cod_substock.rda"))
-  result2 <- prepare_bottomT_projections(processed, projections, output)
+  run2 <- run_script()
+  result2 <- run2$bottomT_projection_results
   expected <- (area[2] * 21 + area[4] * 51) / sum(area[c(2, 4)])
   stopifnot(abs(result2$projections$rcp45[["1"]]$bottomT_Southern_Cluster2[1] -
                   expected) < 1e-5,
             max(abs(result2$historical_comparison$full_minus_saved)) < 1e-10)
 
-  bad <- terra::rast(nrows = 2, ncols = 2, xmin = 0.1, xmax = 2.1,
-                     ymin = 50, ymax = 52, crs = "EPSG:4326")
-  stopifnot(inherits(try(bottomT_same_grid(h, bad, "shifted"), silent = TRUE), "try-error"))
   p <- terra::rast(file.path(projections, "POLCOM_ERSEM_rcp45_bottomT_1.tiff"))
-  stopifnot(inherits(try(bottomT_months(p[[-1]], "incomplete"), silent = TRUE), "try-error"))
-  stopifnot(inherits(try(bottomT_months(p[[-(13:24)]], "missing year"), silent = TRUE),
+  stopifnot(inherits(try(run$get.proj.time(p[[-1]], "incomplete"), silent = TRUE), "try-error"))
+  stopifnot(inherits(try(run$get.proj.time(p[[-(13:24)]], "missing year"), silent = TRUE),
                      "try-error"))
   names(p) <- gsub("-", ".", paste0("X", dates))
   terra::time(p) <- NULL
-  stopifnot(identical(bottomT_months(p, "layer names")$months, format(dates, "%Y-%m")))
-  overlap <- bottomT_overlap(data.frame(year = 2007L, bottomT_Southern = 3),
-                             list(rcp45 = list("1" = data.frame(year = 2007L,
-                                                                bottomT_Southern = 4))))
-  stopifnot(nrow(overlap) == 1, overlap$median_minus_historical == 1)
-  bottomT_plot_diagnostics(file.path(root, "single_year.pdf"),
-                           data.frame(year = 2007L, bottomT_Southern = 3),
-                           data.frame(year = 2007L, variable = "bottomT_Southern", saved = 3),
-                           list(rcp45 = list("1" = data.frame(year = 2007L,
-                                                              bottomT_Southern = 4))))
+  stopifnot(identical(format(run$get.proj.time(p, "layer names"), "%Y-%m"),
+                      format(dates, "%Y-%m")))
+
+  # A cluster with no projection coverage must not produce a time series.
+  no_cluster <- terra::rast(file.path(projections, "POLCOM_ERSEM_rcp45_bottomT_1.tiff"))
+  no_cluster_values <- terra::values(no_cluster)
+  no_cluster_values[3:4, ] <- NA
+  terra::values(no_cluster) <- no_cluster_values
+  missing_file <- file.path(projections, "POLCOM_ERSEM_rcp45_bottomT_2.tiff")
+  terra::writeRaster(no_cluster, missing_file)
+  err <- try(run_script(), silent = TRUE)
+  stopifnot(inherits(err, "try-error"), grepl("no cells on the common footprint", err))
+  unlink(missing_file)
+
+  # A shifted projection grid must be rejected rather than silently resampled.
+  bad <- terra::rast(nrows = 2, ncols = 2, xmin = 0.1, xmax = 2.1,
+                     ymin = 50, ymax = 52, crs = "EPSG:4326", nlyrs = length(dates))
+  terra::values(bad) <- 1
+  terra::time(bad) <- dates
+  bad_file <- file.path(projections, "POLCOM_ERSEM_rcp45_bottomT_2.tiff")
+  terra::writeRaster(bad, bad_file)
+  err <- try(run_script(), silent = TRUE)
+  stopifnot(inherits(err, "try-error"), grepl("grid origin differs", err))
+  unlink(bad_file)
 
   # Old direct SpatRaster saves cannot be restored; report how to repair them.
   bottomT_yr_by_substock_spatial$Southern <- h
   save(bottomT_yr_by_substock_spatial,
        file = file.path(processed, "Spatial_bottomT_yr_by_cod_substock.rda"))
-  err <- try(prepare_bottomT_projections(processed, projections, output), silent = TRUE)
-  stopifnot(inherits(err, "try-error"), grepl("Regenerate the spatial product", err))
+  err <- try(run_script(), silent = TRUE)
+  stopifnot(inherits(err, "try-error"), grepl("Regenerate it with the updated data_01", err))
   cat("Bottom-temperature projection tests passed.\n")
 }
 

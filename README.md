@@ -30,7 +30,6 @@ Scripts for steps 1-4 are present. Steps 5-6 remain planned work.
 | `data_01_prepare_bottomT_by_stubstock.R` | Derives historical annual bottom-temperature means, cluster maps, and cluster time series. |
 | `data_02_join_bottomT_with_substock.R` | Joins lagged environmental covariates to recruitment and age-lagged SSB. |
 | `model_01_fit_EMSRR_BH.R`, `model_01_fit_EMSRR_Segreg.R` | Fit candidate EMSRRs and evaluate them against stock-recruitment baselines. |
-| `functions/prepare_bottomT_projections.R` | Implements the historical/projection aggregation and diagnostics. |
 | `functions/MO.fitness.func.BevertonHolt_MARS.R` | Multiobjective fitness and fitting helpers combining Beverton-Holt stock-recruitment curves with MARS covariate effects. |
 | `functions/MO.fitness.func.envHockeyStick_MARS.R` | Multiobjective fitness and fitting helpers combining hockey-stick curves with MARS covariate effects. |
 | `functions/MO.fitness.func.envHockeyStick.RANSACK_MARS.R` | Experimental robust RANSAC hockey-stick and MARS helpers. |
@@ -115,7 +114,7 @@ Outputs in `data/Env/processed/bottomT_projections/` are:
 - `historical_comparison.csv`: saved versus recomputed full-footprint and common-footprint historical values by variable and year.
 - `common_footprint_coverage.csv`: historical and retained cell counts for each mean and cluster.
 - `historical_projection_overlap.csv`: historical values and the ensemble 10th percentile, median and 90th percentile for each overlapping year, scenario and variable.
-- `historical_projection_comparison.pdf`: saved and common-footprint history, plus projection medians and 10-90% ensemble bands, including the overlap.
+- `historical_projection_comparison.pdf`: saved versus recalculated history, plus projection medians and 10-90% ensemble bands, including the overlap.
 
 Historical and projected records are **not spliced together**. The projections retain their overlap and are not lagged. Before using them with models, account for the one-year lag and `bottomT_mean_<substock>` renaming performed by `data_02`; no projection-to-model join or reference-point interface is implemented here. Bias correction was applied before BVAR simulations, so overlap diagnostics assess the simulated ensemble, not a guarantee that every realization matches historical observations.
 
