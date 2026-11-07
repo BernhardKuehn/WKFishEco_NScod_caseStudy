@@ -17,6 +17,7 @@
 rm(list = ls())
 library(earth)
 library(collapse)
+library(ggplot2)
 
 # -------------------------- #
 # Configuration
@@ -899,3 +900,174 @@ saveRDS(
 
 print(selection_summary)
 print(holdout_metrics)
+
+# ----------------------------------------------------------- #
+# Refit selected models on all years and export model objects
+# ----------------------------------------------------------- #
+
+output_dir = "./data/EMSRRs/"
+dir.create(output_dir,showWarnings = F)
+
+# The selection and holdout evaluation above are unchanged. These new fits use
+# all available data and must not be evaluated again on the same holdout.
+if(!setequal(names(selected_models),expected_substocks)){
+  stop("Expected one selected model for each substock.")
+}
+
+is.bh = vapply(selected_models,function(x) !is.null(x$bh_model),logical(1))
+is.seg = vapply(selected_models,function(x) !is.null(x$seg_model),logical(1))
+
+if(all(is.bh & !is.seg)){
+  sr.type = "BH"
+} else if(all(is.seg & !is.bh)){
+  sr.type = "SEG"
+} else {
+  stop("Selected models must all use the same BH or segmented baseline.")
+}
+
+# The MARS fits use the internal predictor name "x". Translate the selected
+# environmental variable to that name when predicting with a saved model.
+predict.export = function(model.obj,newdata){
+  if(!requireNamespace("earth",quietly = TRUE)){
+    stop("The 'earth' package is required for prediction.")
+  }
+  if(!is.data.frame(newdata) || !all(model.obj$vars %in% names(newdata))){
+    stop("newdata must be a data frame with: ",
+         paste(model.obj$vars,collapse = ", "))
+  }
+  
+  if(!is.null(model.obj$BevertonHolt.model)){
+    sr = model.obj$BevertonHolt.model
+  } else if(!is.null(model.obj$HockeyStick.model)){
+    sr = model.obj$HockeyStick.model
+  } else {
+    stop("No supported stock-recruitment model in model.obj.")
+  }
+  
+  ssb = newdata[[model.obj$vars[1]]]
+  baseline = sr$model(par = sr$params,x = ssb)
+  
+  # Match the fitting scripts: an intercept-only MARS fit adds no effect.
+  if(length(stats::coef(model.obj$MARS.model)) <= 1L){
+    effect = rep(0,length(ssb))
+  } else {
+    effect = as.numeric(stats::predict(
+      model.obj$MARS.model,
+      newdata = data.frame(x = newdata[[model.obj$vars[2]]])
+    ))
+  }
+  
+  exp(log(baseline)+effect)
+}
+environment(predict.export) = baseenv()
+
+# Save the appropriate stock-recruitment function with the model.
+if(sr.type == "BH"){
+  sr.fun = function(par,x) par[["a"]]*x/(x+par[["b"]])
+  sr.name = "BevertonHolt.model"
+} else {
+  sr.fun = function(par,x) par[["a"]]*pmin(x,par[["b"]])
+  sr.name = "HockeyStick.model"
+}
+environment(sr.fun) = baseenv()
+
+# Reproducible starting values for the multistart refits.
+set.seed(seed)
+
+Cod.EMSRR = setNames(vector("list",length(expected_substocks)),
+                     expected_substocks)
+
+for(substk in expected_substocks){
+  
+  selected = selected_models[[substk]]
+  env.var = selected$variable
+  
+  # Use all valid stock observations to determine the parameter bounds.
+  stock = unique(dat[dat$substock == substk,
+                     c("year","rec",ssb_column),drop = FALSE])
+  stock = stock[complete.cases(stock) & is.finite(stock$year) &
+                  is.finite(stock$rec) & is.finite(stock[[ssb_column]]) &
+                  stock$rec > 0 & stock[[ssb_column]] > 0,,drop = FALSE]
+  
+  if(anyDuplicated(stock$year)){
+    stop(substk,": conflicting stock observations for the same year.")
+  }
+  
+  # Keep complete observations for the selected environmental variable.
+  fit.data = dat[dat$substock == substk & dat$variable == env.var,
+                 c("year","rec",ssb_column,"value"),drop = FALSE]
+  
+  valid = complete.cases(fit.data) & is.finite(fit.data$year) &
+    is.finite(fit.data$rec) & is.finite(fit.data[[ssb_column]]) &
+    is.finite(fit.data$value) & fit.data$rec > 0 &
+    fit.data[[ssb_column]] > 0
+  
+  fit.data = fit.data[valid,,drop = FALSE]
+  fit.data = fit.data[order(fit.data$year),,drop = FALSE]
+  
+  if(nrow(fit.data) < 5L || anyDuplicated(fit.data$year)){
+    stop(substk,": need at least five complete observations with unique years.")
+  }
+  
+  # Refit the selected stock-recruitment model on all available data.
+  if(sr.type == "BH"){
+    bounds = get_bh_bounds(substk,stock$rec,stock[[ssb_column]])
+    sr.fit = fit_bh(fit.data$rec,fit.data[[ssb_column]],bounds)
+    baseline = predict_bh(sr.fit,fit.data[[ssb_column]])
+  } else {
+    bounds = get_seg_bounds(substk,stock$rec,stock[[ssb_column]])
+    sr.fit = fit_seg(fit.data$rec,fit.data[[ssb_column]],bounds)
+    baseline = predict_seg(sr.fit,fit.data[[ssb_column]])
+  }
+  
+  # Refit the selected environmental model to the full-data residuals.
+  mars.fit = fit_mars_residual(
+    log_residuals = log(fit.data$rec)-log(baseline),
+    covariate = fit.data$value,
+    linpreds = selected$linpreds
+  )
+  
+  # Structure similar to the attached model object.
+  SR.model = list()
+  SR.model[[sr.name]] = list(
+    model = sr.fun,
+    params = c(a = sr.fit$a,b = sr.fit$b)
+  )
+  SR.model$MARS.model = mars.fit
+  SR.model$vars = c(ssb_column,env.var)
+  SR.model$years = fit.data$year
+  SR.model$observed = fit.data$rec
+  SR.model$optimization = sr.fit[c("objective","convergence","bounds",
+                                   "n_starts","best_start")]
+  
+  # Calculate fitted recruitment and residual SD over all available years.
+  newdata = data.frame(fit.data[[ssb_column]],fit.data$value,
+                       check.names = FALSE)
+  names(newdata) = SR.model$vars
+  
+  SR.model$predicted = predict.export(SR.model,newdata)
+  
+  if(any(!is.finite(SR.model$predicted)) ||
+     any(SR.model$predicted <= 0)){
+    stop(substk,": full-data fit produced invalid recruitment predictions.")
+  }
+  
+  Cod.EMSRR[[substk]] = list(
+    SR.model = SR.model,
+    env.vars = env.var,
+    sd.residuals = sd(log(fit.data$rec)-log(SR.model$predicted)),
+    predict.func = predict.export,
+    
+    # Scores from the earlier training-only model, not the full-data refit.
+    holdout.metrics = holdout_metrics[
+      holdout_metrics$substock == substk,,drop = FALSE
+    ]
+  )
+}
+
+save(Cod.EMSRR,
+     file = file.path(output_dir,paste0("Cod.EMSRR_",sr.type,".RData")))
+
+
+
+
