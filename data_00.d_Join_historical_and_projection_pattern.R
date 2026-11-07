@@ -15,6 +15,7 @@ rm(list = ls())
 
 library(raster)
 library(terra)
+library(ggplot2)
 
 # ---------------- #
 # helper functions
@@ -218,8 +219,9 @@ hist.bounds = terra::ext(min(xy.ext[,1]),max(xy.ext[,2]),
                          min(xy.ext[,3]),max(xy.ext[,4]))
 reference = terra::rast(region.info[[1]]$template)
 months.rcp = list()
+# check only the first iteration (this is enough)
 for(rcp in clim.proj){
-  for(it in names(proj.files[[rcp]])){
+  for(it in "1"){
     filename = proj.files[[rcp]][[it]]
     cat("Checking footprint:",basename(filename),"\n")
     proj = terra::rast(filename)
@@ -283,36 +285,112 @@ hist.comparison$common_minus_saved =
   hist.comparison$recomputed_common-hist.comparison$saved
 
 # ------------------------------------------------------------ #
+# plot difference between original hist and recalculated
+
+ggplot(hist.comparison) + 
+  geom_line(aes(x = year,y = saved),color = "orange",lwd = 1.2) + 
+  geom_line(aes(x = year,y = recomputed_full),color = "red",lwd = 1.2) +
+  geom_line(aes(x = year,y = recomputed_common),color = "aquamarine3",lwd = 1.1) +
+  facet_wrap(~variable,scale = "free_y") + 
+  theme_bw()
+# slight issue with Northwestern Mean and Northwestern Cluster 2
+  
+# ------------------------------------------------------------ #
 # annual projected means using the historical areas and clusters
 # ------------------------------------------------------------ #
 
-bottomT.proj = setNames(vector("list",length(clim.proj)),clim.proj)
-for(rcp in clim.proj){
-  bottomT.proj[[rcp]] = setNames(vector("list",length(proj.files[[rcp]])),
-                                 names(proj.files[[rcp]]))
-  for(it in names(proj.files[[rcp]])){
-    filename = proj.files[[rcp]][[it]]
-    cat("Aggregating:",basename(filename),"\n")
-    proj = terra::crop(terra::rast(filename),hist.bounds)
-    time.proj = get.proj.time(proj,filename)
-    year.proj = as.integer(format(time.proj,"%Y"))
+# need for parallelisation to calculate for all those different 
+# iterations
+library(parallel)
+library(doSNOW)
+library(foreach)
 
-    # Average the twelve monthly values per cell, as in data_01.
-    proj.yr = terra::tapp(proj,year.proj,"mean")
-    proj.values = terra::values(proj.yr,mat = TRUE)
-    proj.fields = lapply(region.info,function(info){
-      index = terra::cellFromXY(proj.yr,info$xy)
-      proj.values[index,,drop = FALSE]
-    })
-    for(substk in names(region.info)){
-      if(any(!is.finite(proj.fields[[substk]][region.info[[substk]]$common,,drop = FALSE]))){
-        stop(filename,": missing data on the common footprint for ",substk)
-      }
-    }
-    bottomT.proj[[rcp]][[it]] =
-      calc.substock.ts(proj.fields,sort(unique(year.proj)),region.info)
+ncores = 2
+
+# SpatExtent contains a process-local pointer; send coordinates instead.
+hist.bounds.xy = as.vector(hist.bounds)
+
+# Only send the information needed for the time-series calculations.
+region.info.worker = lapply(region.info,function(x){
+  x[c("common","cluster","cluster.ids","area","xy")]
+})
+
+bottomT.proj = setNames(vector("list",length(clim.proj)),clim.proj)
+
+# Worker output and errors are written here for diagnosis.
+cl = parallel::makeCluster(ncores,type = "PSOCK",
+                           outfile = "bottomT_workers.log")
+registerDoSNOW(cl)
+
+pb = NULL
+tryCatch({
+  for(rcp in clim.proj){
+    
+    rcp.files = proj.files[[rcp]]
+    its = names(rcp.files)
+    
+    cat("-------","Running",rcp,"-------","\n")
+    
+    pb = txtProgressBar(max = length(its),style = 3)
+    progress = function(n) setTxtProgressBar(pb,n)
+    opts = list(progress = progress)
+
+    # ---------------------------------------------- #
+    # parallelized inner loop for faster computation
+    # ---------------------------------------------- #
+    
+    bottomT_rcp = foreach(it = its,
+                          .combine = "c",
+                          .multicombine = TRUE,
+                          .inorder = TRUE,
+                          .packages = c("raster","terra"),
+                          .options.snow = opts) %dopar% {
+                            
+                            filename = rcp.files[[it]]
+                            cat("Aggregating:",basename(filename),"\n")
+                            
+                            # Rebuild the extent on the worker, then read the file there.
+                            proj = terra::crop(terra::rast(filename),
+                                               terra::ext(hist.bounds.xy))
+                            time.proj = get.proj.time(proj,filename)
+                            year.proj = as.integer(format(time.proj,"%Y"))
+                            
+                            # Average the twelve monthly values per cell, as in data_01.
+                            proj.yr = terra::tapp(proj,year.proj,"mean")
+                            proj.values = terra::values(proj.yr,mat = TRUE)
+                            
+                            proj.fields = lapply(region.info.worker,function(info){
+                              index = terra::cellFromXY(proj.yr,info$xy)
+                              proj.values[index,,drop = FALSE]
+                            })
+                            
+                            for(substk in names(region.info.worker)){
+                              cells = region.info.worker[[substk]]$common
+                              if(any(!is.finite(proj.fields[[substk]][cells,,drop = FALSE]))){
+                                stop(filename,": missing data on the common footprint for ",substk)
+                              }
+                            }
+                            
+                            out = calc.substock.ts(proj.fields,sort(unique(year.proj)),
+                                                   region.info.worker)
+                            
+                            # Preserve each data frame as one list element.
+                            list(out)
+                          }
+    
+    names(bottomT_rcp) = its
+    bottomT.proj[[rcp]] = bottomT_rcp
+    
+    close(pb)
+    pb = NULL
   }
-}
+},finally = {
+  if(!is.null(pb)) close(pb)
+  tryCatch(parallel::stopCluster(cl),
+           error = function(e) warning("Could not stop cluster: ",
+                                       conditionMessage(e)))
+  foreach::registerDoSEQ()
+})
 
 # ----------------------------------------------------- #
 # compare the historical and projected temporal patterns
