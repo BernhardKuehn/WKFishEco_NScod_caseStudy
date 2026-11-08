@@ -16,7 +16,7 @@ library(mseEMSRR)
 library(parallel)
 
 # 1. required functions ------------------------------------------------------
-source("utilities.R")
+source("./functions/utilities.R")
 
 # parallelized functions to run MSE with/without HCR
 
@@ -134,7 +134,7 @@ load(file = "data/BRPs.Rdata")
 ey <- 20
 
 # NUMBER of cores
-ncores <- 20
+ncores <- 25
 
 # -------------------------------------------------- #
 # define periods with a constant environment
@@ -161,7 +161,7 @@ for(stk_name in rownames(BRPs)){ # substock loop
     # load stock object
   
   # stk_name <- "PLE-NS"
-  om.obj.nms = load(file.path("model", paste0("Cod_",substock,"_EMSRR_",srt, "_ccrefpts_input.rda")), verbose = T)
+  om.obj.nms = load(file.path("model", paste0("Cod_",stk_name,"_EMSRR_",srt, "_ccrefpts_input.rda")), verbose = T)
   
   # BRPs with consideration of climate scenarios
   tmp_BRPs = cbind(BRPs[stk_name,]*NA,cc)
