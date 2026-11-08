@@ -424,13 +424,21 @@ for(substock in rownames(BRPs)){
   uiter <- seq(it)
   if(!eqsim_lut[[substock]]$sel_const){ # sample years if not const mean value used
     for(i in uiter){
+      # prepare the selectivity & landings fraction based on sel.yrs
       samp.yrs <- sample(x = eqsim_lut[[substock]]$sel_years, size = length(iy:fy), replace = T)
       om@stock@harvest[, ac(iy:fy),,,,i] <- om@stock@harvest[,ac(samp.yrs),,,,i]
+      
+      om@stock@landings.n[, ac(iy:fy),,,,i] <- om@stock@landings.n[,ac(samp.yrs),,,,i] / om@stock@catch.n[,ac(samp.yrs),,,,i]
+      om@stock@discards.n[, ac(iy:fy),,,,i] <- 1 - om@stock@landings.n[, ac(iy:fy),,,,i]
     }
   }else{ # const mean value used
     for(i in uiter){
       mean.yrs <- eqsim_lut[[substock]]$sel_years
       om@stock@harvest[, ac(iy:fy),,,,i] <- apply(om@stock@harvest[,ac(mean.yrs),,,,i], MARGIN = c(1,3,4,5,6), mean, na.rm = TRUE)
+      
+      om@stock@landings.n[, ac(iy:fy),,,,i] <- apply(om@stock@landings.n[,ac(mean.yrs),,,,i] / om@stock@catch.n[,ac(mean.yrs),,,,i],MARGIN = c(1,3,4,5,6), mean, na.rm = TRUE)
+      om@stock@discards.n[, ac(iy:fy),,,,i] <- 1 - om@stock@landings.n[, ac(iy:fy),,,,i]
+      
     }
   }
   
@@ -446,9 +454,8 @@ for(substock in rownames(BRPs)){
       
       om@stock@landings.wt[, ac(iy:fy),,,,i] <- om@stock@landings.wt[,ac(samp.yrs),,,,i]
       om@stock@discards.wt[, ac(iy:fy),,,,i] <- om@stock@discards.wt[,ac(samp.yrs),,,,i]
+      om@stock@catch.wt[, ac(iy:fy),,,,i] <- om@stock@catch.wt[,ac(samp.yrs),,,,i]
       
-      om@stock@landings.n[, ac(iy:fy),,,,i] <- om@stock@landings.n[,ac(samp.yrs),,,,i] / om@stock@catch.n[,ac(samp.yrs),,,,i]
-      om@stock@discards.n[, ac(iy:fy),,,,i] <- 1 - om@stock@landings.n[, ac(iy:fy),,,,i]
     }
   }else{ # const mean value used
     for(i in uiter){
@@ -460,9 +467,8 @@ for(substock in rownames(BRPs)){
       om@stock@stock.wt[, ac(iy:fy),,,,i] <- apply(om@stock@stock.wt[,ac(mean.yrs),,,,i], MARGIN = c(1,3,4,5,6), mean, na.rm = TRUE)
       om@stock@landings.wt[, ac(iy:fy),,,,i] <- apply(om@stock@landings.wt[,ac(mean.yrs),,,,i], MARGIN = c(1,3,4,5,6), mean, na.rm = TRUE)
       om@stock@discards.wt[, ac(iy:fy),,,,i] <- apply(om@stock@discards.wt[,ac(mean.yrs),,,,i], MARGIN = c(1,3,4,5,6), mean, na.rm = TRUE)
+      om@stock@catch.wt[, ac(iy:fy),,,,i] <- apply(om@stock@catch.wt[,ac(mean.yrs),,,,i], MARGIN = c(1,3,4,5,6), mean, na.rm = TRUE)
       
-      om@stock@landings.n[, ac(iy:fy),,,,i] <- apply(om@stock@landings.n[,ac(mean.yrs),,,,i] / om@stock@catch.n[,ac(mean.yrs),,,,i], MARGIN = c(1,3,4,5,6), mean, na.rm = TRUE)
-      om@stock@discards.n[, ac(iy:fy),,,,i] <- 1 - om@stock@landings.n[, ac(iy:fy),,,,i]
     }
   }
   
