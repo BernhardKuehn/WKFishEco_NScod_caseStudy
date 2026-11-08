@@ -19,9 +19,10 @@ rm(list = ls())
 library(FLCore)
 library(FLasherEMSRR)
 library(mseEMSRR)
+library(stringr)
 
 # 1. required functions ------------------------------------------------------
-source("utilities.R")
+source("./functions/utilities.R")
 
 # function to calculate autocorrelation of residuals 
 calc.rho = function(emsrr.obj,boot.mods){
@@ -40,20 +41,14 @@ calc.rho = function(emsrr.obj,boot.mods){
 
 # 2. load look-up tables ------------------------------------------------------
 
-load(file = "data/eqsim_lut.Rdata")
-load(file = "data/BRPs.Rdata")
-
-BRPs <- BRPs[rownames(BRPs) %in% c("COD-NS", "HER", "POK","PLE-NS","WHG-NS"),]
-
-# define stock name lookup table
-stk_lut = data.frame(stk_abbr = c("COD-NS", "HER", "POK","PLE-NS","WHG-NS"),
-                     stk_long = c("Cod","Herring","Saithe","Plaice","Whiting"))
+load(file = "./data/eqsim_lut.Rdata")
+load(file = "./data/BRPs.Rdata")
 
 # FINAL year
 fy <- 2099
 
-# NUMBER of iterations
-it <- 500
+# NUMBER of iterations (use only 100 for the moment)
+it <- 100 #500
 
 # -------------------------------------------------- #
 # specify deviance type
@@ -75,15 +70,39 @@ cc = cc[!(cc$climScen %in% c("rcp45","rcp85") & cc$period == "None" |
           cc$climScen == "noCC" & cc$period != "None"),]
 print(cc)
 
-# 3. loop through stocks ---------
+# load stock file ----------------
 
-for(stk_name in rownames(BRPs)){
+# Load and identify the three assessment stocks
+stock.file = "./data/stock/cod46a7d20_FLstockObjects_assessment_2026.Rdata"
 
-  # load stock object
-  cat("Building OM for:",stk_name,"...","\n")
+load(stock.file,verbose = T)
+class(stks)
+names(stks) = sapply(1:length(stks),function(x) str_extract(stks[[x]]@name,"Southern|South|Northwestern|Northwest|Viking"))
+names(stks) = dplyr::recode(names(stks),"South" = "Southern","Northwest" = "Northwestern")
+
+# check for name matching
+if(!all(names(stks) %in% rownames(BRPs))){
+  stop("Stk names need to match the rownames in BRPs!")
+}
+
+# 3. loop through substocks ---------
+srr.type = c("BH","SEG")
+
+for(srt in srr.type){ # loop through srr types
+  
+  # load SRR obj with data
+  emsrr.obj.nm = load(file.path("./model/",
+                                paste0(paste("Cod.EMSRR",srt,"model_and_data",sep = "_"),".RData")))
+  emsrr.obj_all = get(emsrr.obj.nm)
+  
+for(substock in rownames(BRPs)){
+
+  # get substock from stock object
+  cat("Building OM for:",substock,"...","\n")
 
   # load stock obj
-  load(paste0("bootstrap/data/", stk_name, ".RData"), verbose = T)
+  stock = stks[[substock]]
+  
   DIMS <- dims(stock)
   RANGE <- range(stock)
   
@@ -94,8 +113,8 @@ for(stk_name in rownames(BRPs)){
   dy <- iy - 1
   
   # define ref-pts
-  BRPs[stk_name,]  
-  refpts <- FLPar(BRPs[stk_name,], params = c("Flim", "Fpa", "Fmsy", "lFmsy", "uFmsy", "Fmgt", "Blim", "Bpa", "Btrigger"), units = "NA")
+  BRPs[substock,]  
+  refpts <- FLPar(BRPs[substock,], params = c("Flim", "Fpa", "Fmsy", "lFmsy", "uFmsy", "Fmgt", "Blim", "Bpa", "Btrigger"), units = "NA")
   
   set.seed(987)
   
@@ -107,15 +126,16 @@ for(stk_name in rownames(BRPs)){
   # ------------------- #
   # prepare EMSRR setup
   
-  emsrr.obj.nm = load(file.path("./bootstrap/data",
-                 paste(stk_lut$stk_long[stk_lut$stk_abbr == stk_name],"EMSRR.model_and_data.Rdata",sep = ".")))
-  emsrr.obj = get(emsrr.obj.nm)
+  # select per substock
+  emsrr.obj = emsrr.obj_all[[substock]]
+  
   # get model & predict function
   mod = emsrr.obj$model$SR.model
   predict.mod = emsrr.obj$model$predict.func
   
   # get shorter stock-name abbreviation
-  stk.nm = sub("-.*","",stk_name)
+  # Unique names also allow BH and SEG files to be loaded together
+  stk.nm = paste(substock,srt,sep = "_")
   
   # define the predict function to match the name of the stock
   assign(paste(stk.nm,"rec.model",sep = "."),emsrr.obj$model$SR.model)
@@ -152,14 +172,14 @@ for(stk_name in rownames(BRPs)){
   } else if(model.type == "boot"){
     
     # add the names of the environmental covars to the model object
-    EMSRRs_boot[[stk_name]]$srr_fit_boot = lapply(EMSRRs_boot[[stk_name]]$srr_fit_boot, function(x){
+    EMSRRs_boot[[substock]]$srr_fit_boot = lapply(EMSRRs_boot[[substock]]$srr_fit_boot, function(x){
       vars = emsrr.obj$model$SR.model$vars
       x$vars = vars
       return(x)
     })
     
     # define a list of models as "rec.model" from the bootstrapped obj
-    assign(paste(stk.nm,"rec.model",sep = "."),EMSRRs_boot[[stk_name]]$srr_fit_boot[1:it])
+    assign(paste(stk.nm,"rec.model",sep = "."),EMSRRs_boot[[substock]]$srr_fit_boot[1:it])
     
     
     # 1. create empty function
@@ -216,7 +236,6 @@ for(stk_name in rownames(BRPs)){
   # replace the EMSRRs by a "no change climate signal" (aka. RCP4.5 without trend)
   # remove the median signal from it.
   
-  if(stk_name %in% stk_lut$stk_abbr){
     tmp = emsrr.obj
     tmp$env.variables$climate.projections$noCC <- tmp$env.variables$climate.projections$rcp45
     env_nms = names(tmp$env.variables$climate.projections$rcp45)
@@ -225,9 +244,11 @@ for(stk_name in rownames(BRPs)){
       x = tmp$env.variables$climate.projections$rcp45[[env]]
       med = apply(x[, -1], 1, median)
       yrs = x$year
-      lag = as.numeric(gsub(".*lag","",env))
+      lag = tmp$model$env.lag
+      if(length(lag) != 1L || is.na(lag) || lag != 1L){
+        stop("Expected the one-year environmental lag saved by model_02.")
+      }
       # set the offset of the noCC run to the HISTORICAL mean over 2006 - 2020
-      ### changed: 2026-05-28
       x_hist = tmp$env.variables$historical[,c("year",env)]
       # offset for the noCC run defined as the historical overlapping period
       offset = mean(x_hist[x_hist$year %in% ((2006:2020)+lag),env])
@@ -256,7 +277,6 @@ for(stk_name in rownames(BRPs)){
     }
     # assign
     assign(x = "emsrr.obj",value = tmp)
-  }
   
   # --------------------------------------------------------------- #
   # deviances (lognormal distributed iid)
@@ -266,7 +286,7 @@ for(stk_name in rownames(BRPs)){
   set.seed(42)
   # get cv of the fits
   if(model.type == "boot"){
-  cv = EMSRRs_boot[[stk_name]]$srr_pars_boot$cv
+  stop("Bootstrapped EMSRRs not defined yet...")
   } else if(model.type == "single"){
     cv = rep(emsrr.obj$model$sd.residuals,it)
   } else {
@@ -296,7 +316,7 @@ for(stk_name in rownames(BRPs)){
     # - fit AR1 model
     if(model.type == "boot"){
     rho = calc.rho(emsrr.obj,
-                   boot.mods = EMSRRs_boot[[stk_name]]$srr_fit_boot)
+                   boot.mods = EMSRRs_boot[[substock]]$srr_fit_boot)
     } else if(model.type == "single"){
       rho = rep(calc.rho(emsrr.obj,
                      boot.mods = list(mod)),it)
@@ -313,35 +333,6 @@ for(stk_name in rownames(BRPs)){
   } else {
     stop("Please specify 'deviance.type' either as 'lognormal' or 'lognormal_ar1'!")
   }
-  # 
-  # input.dat = merge(emsrr.obj$stock.data,emsrr.obj$env.variables$historical)
-  # pred = emsrr.obj$model$predict.func(EMSRRs_boot[[stk_name]]$srr_fit_boot[[1]],
-  #                              newdata = input.dat)
-  # obs = input.dat$rec
-  # plot(pred-obs,type = "l")
-  # acf(pred-obs)
-  # acf(residuals(EMSRRs_boot[[stk_name]]$srr_fit_boot[[1]]$MARS.model),col = "red",add = T)
-  # 
-  # 
-  # srr_resids = lapply(EMSRRs_boot[[stk_name]]$srr_fit_boot,function(x) residuals(x$MARS.model))
-  # # get autocorrelation coefficient
-  # rho = sapply(srr_resids,function(x) acf(x,plot = F)$acf[2])
-  # hist(rho)
-  # rho = sapply(srr_resids,function(x) forecast::Arima(x,order = c(1,0,0))$coef[1])
-  # hist(rho)
-  # rho = sapply(srr_resids,function(x){
-  #   a = forecast::Arima(x,order = c(1,0,0))
-  #   b = lmtest::coeftest(a)
-  #   if(b[1,4] < 0.05){
-  #     return(a$coef[1])
-  #   } else {
-  #     return(0)
-  #   }})
-  # hist(rho) # almost no significant autocorrelation....
-  # which(rho != 0)
-  # acf(residuals(EMSRRs_boot[[stk_name]]$srr_fit_boot[[48]]$MARS.model))
-  # 
-  # 
   
   dim(srdevs)
   
@@ -431,23 +422,23 @@ for(stk_name in rownames(BRPs)){
   # RESAMPLE forecast year slots with Eqsim definitions
   # catchability / selectivity
   uiter <- seq(it)
-  if(!eqsim_lut[[stk_name]]$sel_const){ # sample years if not const mean value used
+  if(!eqsim_lut[[substock]]$sel_const){ # sample years if not const mean value used
     for(i in uiter){
-      samp.yrs <- sample(x = eqsim_lut[[stk_name]]$sel_years, size = length(iy:fy), replace = T)
+      samp.yrs <- sample(x = eqsim_lut[[substock]]$sel_years, size = length(iy:fy), replace = T)
       om@stock@harvest[, ac(iy:fy),,,,i] <- om@stock@harvest[,ac(samp.yrs),,,,i]
     }
   }else{ # const mean value used
     for(i in uiter){
-      mean.yrs <- eqsim_lut[[stk_name]]$sel_years
+      mean.yrs <- eqsim_lut[[substock]]$sel_years
       om@stock@harvest[, ac(iy:fy),,,,i] <- apply(om@stock@harvest[,ac(mean.yrs),,,,i], MARGIN = c(1,3,4,5,6), mean, na.rm = TRUE)
     }
   }
   
   # ind weight (stock, landings, discards)
   # and biological slots
-  if(!eqsim_lut[[stk_name]]$bio_const){ # sample years if not const mean value used
+  if(!eqsim_lut[[substock]]$bio_const){ # sample years if not const mean value used
     for(i in uiter){
-      samp.yrs <- sample(x = eqsim_lut[[stk_name]]$bio_years, size = length(iy:fy), replace = T)
+      samp.yrs <- sample(x = eqsim_lut[[substock]]$bio_years, size = length(iy:fy), replace = T)
       
       om@stock@mat[, ac(iy:fy),,,,i] <- om@stock@mat[,ac(samp.yrs),,,,i]
       om@stock@m[, ac(iy:fy),,,,i] <- om@stock@m[,ac(samp.yrs),,,,i]
@@ -461,7 +452,7 @@ for(stk_name in rownames(BRPs)){
     }
   }else{ # const mean value used
     for(i in uiter){
-      mean.yrs <- eqsim_lut[[stk_name]]$bio_years
+      mean.yrs <- eqsim_lut[[substock]]$bio_years
       
       om@stock@mat[, ac(iy:fy),,,,i] <- apply(om@stock@mat[,ac(mean.yrs),,,,i], MARGIN = c(1,3,4,5,6), mean, na.rm = TRUE)
       om@stock@m[, ac(iy:fy),,,,i] <- apply(om@stock@m[,ac(mean.yrs),,,,i], MARGIN = c(1,3,4,5,6), mean, na.rm = TRUE)
@@ -505,8 +496,8 @@ for(stk_name in rownames(BRPs)){
                       meanlog = 0, sdlog = SSBcv, bias.correct = F))
     return(devs)
   }
-  sdevs <- shortcut_devs2(om, Fcv=eqsim_lut[[stk_name]]$Fcv, 
-                          Fphi=eqsim_lut[[stk_name]]$Fphi, SSBcv=eqsim_lut[[stk_name]]$SSBcv)
+  sdevs <- shortcut_devs2(om, Fcv=eqsim_lut[[substock]]$Fcv, 
+                          Fphi=eqsim_lut[[substock]]$Fphi, SSBcv=eqsim_lut[[substock]]$SSBcv)
   
   
   # - CONSTRUCT iem, implementation error module w/10% noise **
@@ -522,10 +513,10 @@ for(stk_name in rownames(BRPs)){
        grep(paste(paste0("om_",paste(cc$climScen,cc$period,sep = "_")),collapse = "|"),ls(),value = T),
        "iem", "sdevs", "iy",
        # export functions related to the EMSRR
-       grep(stk.nm,grep("sr_predict|rec.model|predict.func",ls(),value = T),value = T)
+       grep(paste(substock,srt,sep = "_"),grep("sr_predict|rec.model|predict.func",ls(),value = T),value = T)
        ), 
-       file = file.path("data", paste0(stk_name,"_EMSRR", "_data.rda")), compress="xz")
+       file = file.path("model", paste0("Cod_",substock,"_EMSRR_",srt, "_ccrefpts_input.rda")), compress="xz")
   
-}
-
+  } # end of substock loop
+} # end of sr-type loop
 
