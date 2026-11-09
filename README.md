@@ -36,28 +36,82 @@ functions.
 
 ## Requirements
 
-### Local input data
+### Initial input archive
 
-Input data are not included in the repository. The scripts use
-hard-coded paths relative to the repository root:
+Input data are not included in the repository, and a Figshare archive for
+this case study has not yet been configured here. Once the source files
+have been assembled and uploaded as a ZIP to Figshare, set its **file
+download URL** (including the private-link query if applicable) and run
+the downloader from the repository root:
+
+``` r
+Sys.setenv(FIGSHARE_INPUT_URL = "https://figshare.com/ndownloader/files/REPLACE_WITH_FILE_ID")
+source("data_00_download_inputs.R")
+```
+
+Alternatively, run `FIGSHARE_INPUT_URL='https://...' Rscript
+data_00_download_inputs.R` from a shell. Use the download link for this
+case study, not the unrelated tutorial example. The downloader uses base
+R and, when available, the Info-ZIP `unzip` utility for ZIP64 support.
+Without that utility, ZIP64 archives are rejected because R's internal
+unzip cannot reliably extract individual members of 4 GiB or larger.
+The downloader extracts to a temporary directory, validates the archive
+layout, and installs the inputs under `data/`. Allow enough
+temporary disk space for both the ZIP and its extracted contents as well
+as space for the installed files; set `TMPDIR` before starting R if
+needed. A repeat run skips identical files and stops rather than
+overwriting differing files.
+
+The ZIP must contain the following paths directly at its root, without a
+wrapping folder. These are the external source datasets needed by the
+analysis scripts:
 
 | Input | Expected location |
 |------------------------------------|------------------------------------|
-| AHOI NetCDF files | `data/Env/AHOI/v23.05/` |
-| ICES rectangle shapefile and companion files | `data/ICES_stat_rect/StatRec_map_Areas_Full_20170124.shp` |
+| Monthly AHOI v23.05 NetCDF files | `data/Env/AHOI/v23.05/*.nc` |
+| ICES rectangle shapefile and companion files | `data/ICES_stat_rect/StatRec_map_Areas_Full_20170124.{shp,shx,dbf,prj}` |
 | Substock-area lookup | `data/stock/Area_NSCOD3_table_6a_inshore_offshore.xlsx` |
 | Assessment stock objects | `data/stock/cod46a7d20_FLstockObjects_assessment_2026.Rdata` |
 | RCP4.5 POLCOMS-ERSEM bottom temperature | `data/Env/POLCOMS-ERSEM/POLCOM_ERSEM_GreaterNorthSea_rcp45_BottomTemp_raster_2006_2099.RData` |
 | RCP8.5 POLCOMS-ERSEM bottom temperature | `data/Env/POLCOMS-ERSEM/POLCOM_ERSEM_GreaterNorthSea_rcp85_BottomTemp_raster_2006_2099.RData` |
 
-Confirm data access permissions, provenance, and licensing before
-obtaining or sharing the inputs.
+Include all monthly AHOI files, directly in the indicated directory.
+The first run of digits in each filename must be its six-digit `YYYYMM`
+date, as expected by `data_00.a`. Each file must contain the coordinates,
+depth and environmental variables used by that script. Include any
+additional shapefile sidecars with the same basename. The assessment file
+must contain the substock list used by the stock scripts; the two projection
+files must contain the named raster objects expected by `data_00.b` and
+be self-contained rather than referencing unavailable local raster files.
+
+Do not include generated rasters, model fits, lookup tables, or simulations
+in this archive: the workflow creates those from the source data. The
+downloader checks filenames, basic completeness, and extracted file sizes;
+it does not validate scientific content or provenance. Confirm the
+coverage, data access permissions, provenance, and licensing before
+obtaining, uploading, or sharing the inputs. A private Figshare link
+should be kept out of committed files.
+
+For example, from a directory containing the source `data/` tree, the
+following creates the expected layout using the `zip` command:
+
+``` sh
+zip -r ../wkfisheco_inputs.zip \
+  data/Env/AHOI/v23.05/*.nc \
+  data/ICES_stat_rect/StatRec_map_Areas_Full_20170124.* \
+  data/stock/Area_NSCOD3_table_6a_inshore_offshore.xlsx \
+  data/stock/cod46a7d20_FLstockObjects_assessment_2026.Rdata \
+  data/Env/POLCOMS-ERSEM/POLCOM_ERSEM_GreaterNorthSea_rcp45_BottomTemp_raster_2006_2099.RData \
+  data/Env/POLCOMS-ERSEM/POLCOM_ERSEM_GreaterNorthSea_rcp85_BottomTemp_raster_2006_2099.RData
+```
 
 The AHOI processing script describes historical data for 1948-2024,
 whereas the later scripts expect a raster named
 `AHOI_BottomTemp_raster_1945_2024.tif`. The generated filename reflects
-the actual input dates. Check the coverage and filename, and update the
-paths in the later scripts if necessary.
+the actual input dates. The downloader warns about gaps and differing
+start/end years, but cannot resolve this discrepancy. Check the coverage
+and filename, and update the paths and year assumptions in the later
+scripts if necessary before running the analysis.
 
 ### R packages and environment
 
@@ -122,10 +176,10 @@ library(data.table)
 source("model_04_ccrefpts_runRefptSim.R")
 ```
 
-The scripts do not download data or install packages. Some contain plots
-and interactive diagnostics, and not every input is validated in
-advance. Review configuration and intermediate outputs before running
-the full workflow.
+Run the input downloader above before the workflow. The analysis scripts
+do not install packages. Some contain plots and interactive diagnostics,
+and not every input is validated in advance. Review configuration and
+intermediate outputs before running the full workflow.
 
 Processing can require substantial time, memory, and disk space. In
 particular:
@@ -324,4 +378,3 @@ management recommendation. Cite the source data, assessment products,
 model methods, and software used in any resulting report or publication.
 Interpret results only after the data, model fits, projections, and
 reference-point calculations have been reviewed and validated.
-
