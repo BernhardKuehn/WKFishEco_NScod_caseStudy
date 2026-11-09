@@ -5,6 +5,7 @@ library(FLCore)
 library(FLasher)
 library(mse)
 library(parallel)
+library(msemodules)
 
 # 0. create output directory --------------------------
 
@@ -22,6 +23,7 @@ segreg3 <- function(ab, ssb) log(ifelse(ssb >= BlimBloss, ab$a * BlimBloss, ab$a
 parFun_noHCR <- function(x){
   library(mse)
   library(FLasher)
+  library(msemodules)
   
   Ftarg <- info$Ftarg[x]
   
@@ -77,6 +79,7 @@ parFun_noHCR <- function(x){
 parFun_HCR <- function(x,Btrigger){
   library(mse)
   library(FLasher)
+  library(msemodules)
   
   Ftarg <- info$Ftarg[x]
   
