@@ -172,7 +172,7 @@ for(substock in rownames(BRPs)){
   }
   
   dir.create("./data/SRRs",showWarnings = F)
-  save(fits, srpars, file=file.path("data","SRR", paste0("Cod_",substock, "_SRR_bootstrap.rda")), compress="xz")
+  save(fits, srpars, file=file.path("data","SRRs", paste0("Cod_",substock, "_SRR_bootstrap.rda")), compress="xz")
   
   
   # - CONSTRUCT OM

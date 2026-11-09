@@ -6,6 +6,10 @@ library(FLasher)
 library(mse)
 library(parallel)
 
+# 0. create output directory --------------------------
+
+dir.create(file.path("model", "refpts"), recursive = TRUE, showWarnings = FALSE)
+
 # 1. required functions ------------------------------------------------------
 source("./functions/utilities.R")
 
@@ -308,7 +312,7 @@ for(stk_name in rownames(BRPs)){
   names(tt) = paste(stk_name,"om","benchmark",sep = "_")
   
   # save results
-  save(df, df2,tt, file = file.path("model", paste0(stk_name,"_benchmark", "_model.rda")), compress="xz")
+  save(df, df2,tt, file = file.path("model","refpts", paste0(stk_name,"_SRR","_benchmark", "_model.rda")), compress="xz")
 
 }
 
