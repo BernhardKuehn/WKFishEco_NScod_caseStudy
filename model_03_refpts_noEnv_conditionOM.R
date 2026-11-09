@@ -147,9 +147,10 @@ for(substock in rownames(BRPs)){
   SRmodsAdj <- replace(SRmods, SRmods == "segregfix", "segreg")
   
   # FIT models
-  if("segreg3" %in% SRmods){
+  if("segregfix" %in% SRmods){
+    brkpt = ifelse(substock %in% c("Northwestern","Viking"),as.numeric(ssb(stkSRyrs)[,ac(2006 - recrLag),]),BRPs[substock, "Blim"])
     fits <- srrTMB(as.FLSRs(stkSRyrs, models=SRmodsAdj), 
-      spr0 = mean(spr0y(stkSRyrs)), Blim = BRPs[substock, "Blim"])
+      spr0 = mean(spr0y(stkSRyrs)), Blim = brkpt)
   }else{
     fits <- srrTMB(as.FLSRs(stkSRyrs, models=SRmodsAdj), 
       spr0=mean(spr0y(stkSRyrs)))
@@ -161,16 +162,17 @@ for(substock in rownames(BRPs)){
   # plotsrts(fits, relative = TRUE)
 
   # BOOTSTRAP and SELECT model by largest logLik **
-  if("segreg3" %in% SRmods){
+  if("segregfix" %in% SRmods){
+    brkpt = ifelse(substock %in% c("Northwestern","Viking"),as.numeric(ssb(stkSRyrs)[,ac(2006 - recrLag),]),BRPs[substock, "Blim"])
     srpars <- bootstrapSR(stkSRyrs, iters=it,
-      models=SRmodsAdj, method="best", Blim = BRPs[substock, "Blim"],spr0 = mean(spr0y(stkSRyrs)))
+      models=SRmodsAdj, method="best", Blim = brkpt,spr0 = mean(spr0y(stkSRyrs)))
   }else{
     srpars <- bootstrapSR(stkSRyrs, iters=it,
       models=SRmodsAdj, method="best",spr0 = mean(spr0y(stkSRyrs)))
   }
   
-  dir.create("./data/SRR",showWarnings = F)
-  save(fits, srpars, file=file.path("data","SRR", paste0(substock, "_bootstrap.rda")), compress="xz")
+  dir.create("./data/SRRs",showWarnings = F)
+  save(fits, srpars, file=file.path("data","SRR", paste0("Cod_",substock, "_SRR_bootstrap.rda")), compress="xz")
   
   
   # - CONSTRUCT OM
@@ -184,8 +186,14 @@ for(substock in rownames(BRPs)){
     srpars_df = pivot(srpars_df,ids = "iter",names = "params",how = "wider")
     srpars_df$iter = an(ac(srpars_df$iter))
     srpars_df = srpars_df[,c("iter","a","b","m")]
-    srpars_df$mod <- ifelse(srpars_df$m == 1,"segreg",
-                            ifelse(srpars_df$m == 2,"ricker","bh"))
+    srpars_df$mod <- ifelse(srpars_df$m == 1,"bh",
+                            ifelse(srpars_df$m == 2,"ricker",
+                              ifelse(srpars_df$m == 3,"segreg")))
+    # print
+    cat("# -------------------------------------------------------------------- #","\n")
+    cat("Running autocorrelation routine with",">>>",unique(srpars_df$mod),"<<<","selected as SRR.","\n")
+    cat("# --------------------------------------------------------------------- #","\n")
+    
     srpars_df$m <- NULL
     ssb_rec_df = data.frame(rec = dplyr::lag(as.numeric(rec(stkSRyrs)),RANGE[["min"]]),
                             ssb = as.numeric(ssb(stkSRyrs)))
@@ -249,6 +257,7 @@ for(substock in rownames(BRPs)){
     
       om@stock@landings.wt[, ac(iy:fy),,,,i] <- om@stock@landings.wt[,ac(samp.yrs),,,,i]
       om@stock@discards.wt[, ac(iy:fy),,,,i] <- om@stock@discards.wt[,ac(samp.yrs),,,,i]
+      om@stock@catch.wt[, ac(iy:fy),,,,i] <- om@stock@catch.wt[,ac(samp.yrs),,,,i]
     }
   }else{ # const mean value used
     for(i in uiter){
@@ -260,6 +269,7 @@ for(substock in rownames(BRPs)){
       om@stock@stock.wt[, ac(iy:fy),,,,i] <- apply(om@stock@stock.wt[,ac(mean.yrs),,,,i], MARGIN = c(1,3,4,5,6), mean, na.rm = TRUE)
       om@stock@landings.wt[, ac(iy:fy),,,,i] <- apply(om@stock@landings.wt[,ac(mean.yrs),,,,i], MARGIN = c(1,3,4,5,6), mean, na.rm = TRUE)
       om@stock@discards.wt[, ac(iy:fy),,,,i] <- apply(om@stock@discards.wt[,ac(mean.yrs),,,,i], MARGIN = c(1,3,4,5,6), mean, na.rm = TRUE)
+      om@stock@catch.wt[, ac(iy:fy),,,,i] <- apply(om@stock@catch.wt[,ac(mean.yrs),,,,i], MARGIN = c(1,3,4,5,6), mean, na.rm = TRUE)
     }
   }
   
@@ -306,7 +316,7 @@ for(substock in rownames(BRPs)){
   
   # - SAVE
   
-  save(om, iem, sdevs, iy, file = file.path("model", paste0("Cod_",substock, "refpts_input.rda")), compress="xz")
+  save(om, iem, sdevs, iy, file = file.path("model", paste0("Cod_",substock, "_refpts_input.rda")), compress="xz")
 
 }
 
