@@ -4,4 +4,7 @@
 .Ruserdata
 *.nc/
 ICES_stat_rect/
+/data/Env/AHOI/
+/data/Env/POLCOMS-ERSEM/
+/data/stock/
 /results/model_01_fit_EMSRR/
