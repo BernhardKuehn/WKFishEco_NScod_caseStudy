@@ -128,8 +128,6 @@ parFun_HCR <- function(x,Btrigger){
 load(file = "data/eqsim_lut.Rdata")
 load(file = "data/BRPs.Rdata")
 
-BRPs <- BRPs[rownames(BRPs) %in% c("COD-NS", "HER", "POK","PLE-NS","WHG-NS"),]
-
 # NUMBER of evaluation years
 ey <- 20
 
@@ -141,7 +139,7 @@ newBRPs_bench <- BRPs*NA
 for(stk_name in rownames(BRPs)){
   # load stock object
   
-  load(file.path("model", paste0("Cod_",substock, "_refpts_input.rda")), verbose = T)
+  load(file.path("model", paste0("Cod_",stk_name, "_refpts_input.rda")), verbose = T)
   
   DIMS <- dims(om@stock)
   RANGE <- range(om@stock)

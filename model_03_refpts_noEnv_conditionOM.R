@@ -148,7 +148,7 @@ for(substock in rownames(BRPs)){
   
   # FIT models
   if("segregfix" %in% SRmods){
-    brkpt = ifelse(substock %in% c("Northwestern","Viking"),as.numeric(ssb(stkSRyrs)[,ac(2006 - recrLag),]),BRPs[substock, "Blim"])
+    brkpt = ifelse(substock %in% c("Northwestern","Viking"),as.numeric(ssb(stkSRyrs)[,ac(2006),]),BRPs[substock, "Blim"])
     fits <- srrTMB(as.FLSRs(stkSRyrs, models=SRmodsAdj), 
       spr0 = mean(spr0y(stkSRyrs)), Blim = brkpt)
   }else{
@@ -163,7 +163,7 @@ for(substock in rownames(BRPs)){
 
   # BOOTSTRAP and SELECT model by largest logLik **
   if("segregfix" %in% SRmods){
-    brkpt = ifelse(substock %in% c("Northwestern","Viking"),as.numeric(ssb(stkSRyrs)[,ac(2006 - recrLag),]),BRPs[substock, "Blim"])
+    brkpt = ifelse(substock %in% c("Northwestern","Viking"),as.numeric(ssb(stkSRyrs)[,ac(2006),]),BRPs[substock, "Blim"])
     srpars <- bootstrapSR(stkSRyrs, iters=it,
       models=SRmodsAdj, method="best", Blim = brkpt,spr0 = mean(spr0y(stkSRyrs)))
   }else{

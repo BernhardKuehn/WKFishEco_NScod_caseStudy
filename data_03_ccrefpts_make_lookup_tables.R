@@ -23,7 +23,7 @@
 eqsim_lut = list(
   
   list(stock = "Southern",
-       srr_years = 1997:2025, srr_type = 2,
+       srr_years = 1998:2025, srr_type = 2,
        bio_years = 2016:2025, sel_years = 2023:2025,
        bio_const = FALSE, sel_const = FALSE,
        models = "Segreg", rhologRec = TRUE,
@@ -32,7 +32,7 @@ eqsim_lut = list(
        blim_models = "Segreg"),
   
   list(stock = "Northwestern",
-       srr_years = 1997:2025, srr_type = NA_integer_,
+       srr_years = 1998:2025, srr_type = NA_integer_,
        bio_years = 2016:2025, sel_years = 2023:2025,
        bio_const = FALSE, sel_const = FALSE,
        models = "SegregFix", rhologRec = TRUE,
@@ -42,7 +42,7 @@ eqsim_lut = list(
        notes = "FMSY fit: type 5/6; breakpoint fixed at 2006 SSB (Bloss)."),
   
   list(stock = "Viking",
-       srr_years = 1997:2025, srr_type = NA_integer_,
+       srr_years = 1998:2025, srr_type = NA_integer_,
        bio_years = 2016:2025, sel_years = 2023:2025,
        bio_const = FALSE, sel_const = FALSE,
        models = "SegregFix", rhologRec = TRUE,
