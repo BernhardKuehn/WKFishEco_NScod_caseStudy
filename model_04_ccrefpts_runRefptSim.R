@@ -15,6 +15,10 @@ library(FLasherEMSRR)
 library(mseEMSRR)
 library(parallel)
 
+# 0. create output directory --------------------------
+
+dir.create(file.path("model", "refpts"), recursive = TRUE, showWarnings = FALSE)
+
 # 1. required functions ------------------------------------------------------
 source("./functions/utilities.R")
 
