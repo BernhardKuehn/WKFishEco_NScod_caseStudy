@@ -1,44 +1,45 @@
 # Download the external inputs. Run from the repository root.
 
-download_inputs <- function() {
+download_inputs <- function(
+    figshare_doi = "https://doi.org/10.6084/m9.figshare.34961302",
+    ices_url = "https://gis.ices.dk/shapefiles/ICES_rectangles.zip",
+    figshare = TRUE, ices = TRUE, figshare_api_url = NULL) {
+  
+  library(jsonlite)
+  
   if (!file.exists("data_00.a_Handle_AHOI_data.R") ||
       !dir.exists("functions")) {
     stop("Run this script from the repository root.")
   }
   
-  selection <- Sys.getenv("DOWNLOAD_INPUTS", unset = "all")
-  if (!selection %in% c("all", "figshare", "ices")) {
-    stop("DOWNLOAD_INPUTS must be 'all', 'figshare', or 'ices'.")
+  if (!is.logical(figshare) || length(figshare) != 1L || is.na(figshare) ||
+      !is.logical(ices) || length(ices) != 1L || is.na(ices) ||
+      (!figshare && !ices)) {
+    stop("Select at least one source using figshare = TRUE or ices = TRUE.")
   }
   
-  figshare_files <- c(
-    FIGSHARE_RCP45_URL = "data/Env/POLCOMS-ERSEM/POLCOM_ERSEM_GreaterNorthSea_rcp45_BottomTemp_raster_2006_2099.RData",
-    FIGSHARE_RCP85_URL = "data/Env/POLCOMS-ERSEM/POLCOM_ERSEM_GreaterNorthSea_rcp85_BottomTemp_raster_2006_2099.RData",
-    FIGSHARE_AHOI_RASTER_URL = "data/Env/processed/AHOI_BottomTemp_raster_1945_2024.tif",
-    FIGSHARE_STOCK_AREAS_URL = "data/stock/Area_NSCOD3_table_6a_inshore_offshore.xlsx",
-    FIGSHARE_STOCK_OBJECTS_URL = "data/stock/cod46a7d20_FLstockObjects_assessment_2026.Rdata"
-  )
-  
-  figshare_urls <- Sys.getenv(names(figshare_files), unset = "")
-  if (selection != "ices" && any(!nzchar(figshare_urls))) {
+  if (figshare && !requireNamespace("jsonlite", quietly = TRUE)) {
     stop(
-      "Set the missing Figshare file download URLs: ",
-      paste(names(figshare_files)[!nzchar(figshare_urls)], collapse = ", "),
-      ". For ICES only, set DOWNLOAD_INPUTS=ices."
+      "The jsonlite package is required to read Figshare metadata. ",
+      "Install it with install.packages('jsonlite')."
     )
   }
   
-  ices_url <- Sys.getenv(
-    "ICES_RECTANGLES_URL",
-    unset = "https://gis.ices.dk/shapefiles/ICES_rectangles.zip"
-  )
+  if (figshare && is.null(figshare_api_url)) {
+    if (length(figshare_doi) != 1L || is.na(figshare_doi) ||
+        !grepl("^https://doi\\.org/10\\.6084/m9\\.figshare\\.[0-9]+$",
+               figshare_doi)) {
+      stop("Expected an unversioned Figshare DOI URL.")
+    }
+    figshare_api_url <- paste0(
+      "https://api.figshare.com/v2/articles/",
+      sub(".*\\.", "", figshare_doi)
+    )
+  }
   
-  urls <- c(
-    if (selection != "ices") figshare_urls,
-    if (selection != "figshare") ices_url
-  )
-  if (any(!grepl("^(https|file)://", urls, ignore.case = TRUE))) {
-    stop("Download URLs must use HTTPS or local file:// URLs.")
+  urls <- c(if (figshare) figshare_api_url, if (ices) ices_url)
+  if (anyNA(urls) || any(!grepl("^(https|file)://", urls, ignore.case = TRUE))) {
+    stop("Source URLs must use HTTPS or local file:// URLs.")
   }
   
   staging <- tempfile(pattern = "wkfisheco-inputs-")
@@ -61,16 +62,97 @@ download_inputs <- function() {
   staged <- character()
   destinations <- character()
   
-  if (selection != "ices") {
+  if (figshare) {
+    figshare_files <- c(
+      "data/Env/POLCOMS-ERSEM/POLCOM_ERSEM_GreaterNorthSea_rcp45_BottomTemp_raster_2006_2099.RData",
+      "data/Env/POLCOMS-ERSEM/POLCOM_ERSEM_GreaterNorthSea_rcp85_BottomTemp_raster_2006_2099.RData",
+      "data/Env/processed/AHOI_BottomTemp_raster_1945_2024.tif",
+      "data/stock/Area_NSCOD3_table_6a_inshore_offshore.xlsx",
+      "data/stock/cod46a7d20_FLstockObjects_assessment_2026.Rdata"
+    )
+    
+    aliases <- lapply(basename(figshare_files), identity)
+    aliases[[3]] <- c(
+      aliases[[3]],
+      "AHOI_BottomTempRaster_1945_2024.tif"
+    )
+    
+    metadata <- file.path(staging, "figshare.json")
+    download(figshare_api_url, metadata, "Figshare article metadata")
+    
+    article <- tryCatch(
+      jsonlite::fromJSON(metadata, simplifyVector = FALSE),
+      error = function(e) {
+        stop("Could not read Figshare metadata: ", conditionMessage(e))
+      }
+    )
+    
+    if (!is.list(article) || !is.list(article$files) || !length(article$files)) {
+      stop("Figshare metadata contains no file list.")
+    }
+    
+    file_names <- vapply(article$files, function(file) {
+      if (is.list(file) && is.character(file$name) &&
+          length(file$name) == 1L && !is.na(file$name)) {
+        file$name
+      } else {
+        NA_character_
+      }
+    }, character(1))
+    
+    if (anyNA(file_names) || any(!nzchar(file_names))) {
+      stop("Figshare metadata contains an invalid filename.")
+    }
+    
+    selected <- lapply(seq_along(figshare_files), function(i) {
+      matches <- which(tolower(file_names) %in% tolower(aliases[[i]]))
+      
+      if (length(matches) != 1L) {
+        stop(
+          "Expected exactly one Figshare file matching ",
+          paste(aliases[[i]], collapse = " or "),
+          "; found ", length(matches), "."
+        )
+      }
+      
+      file <- article$files[[matches]]
+      if (!is.character(file$download_url) ||
+          length(file$download_url) != 1L ||
+          is.na(file$download_url) ||
+          !grepl("^(https|file)://", file$download_url, ignore.case = TRUE) ||
+          !is.numeric(file$size) || length(file$size) != 1L ||
+          is.na(file$size) || !is.finite(file$size) || file$size <= 0 ||
+          !is.character(file$computed_md5) ||
+          length(file$computed_md5) != 1L ||
+          is.na(file$computed_md5) ||
+          !grepl("^[0-9a-fA-F]{32}$", file$computed_md5)) {
+        stop(
+          "Figshare metadata has an invalid URL, size or checksum for ",
+          file_names[matches], "."
+        )
+      }
+      file
+    })
+    
     for (i in seq_along(figshare_files)) {
       path <- file.path(staging, paste0("figshare-", i))
-      download(figshare_urls[i], path, basename(figshare_files[i]))
+      download(selected[[i]]$download_url, path, basename(figshare_files[i]))
+      
+      checksum <- unname(tools::md5sum(path))
+      if (is.na(checksum) || file.info(path)$size != selected[[i]]$size ||
+          tolower(checksum) != tolower(selected[[i]]$computed_md5)) {
+        stop(
+          "Downloaded Figshare file failed size or checksum validation: ",
+          basename(figshare_files[i])
+        )
+      }
+      
       staged <- c(staged, path)
-      destinations <- c(destinations, unname(figshare_files[i]))
+      destinations <- c(destinations, figshare_files[i])
     }
   }
   
-  if (selection != "figshare") {
+  if (ices) {
     archive <- file.path(staging, "ices.zip")
     download(ices_url, archive, "ICES statistical rectangles")
     
@@ -244,21 +326,3 @@ download_inputs <- function() {
 }
 
 download_inputs()
-rm(download_inputs)
-
-# download data from ICES (statistical rectangles)
-Sys.setenv(DOWNLOAD_INPUTS = "ices")
-source("data_00_download_inputs.R")
-
-# Download figshare data
-Sys.unsetenv("DOWNLOAD_INPUTS")
-Sys.setenv(
-  FIGSHARE_RCP45_URL = "https://figshare.com/ndownloader/files/RCP45_FILE_ID",
-  FIGSHARE_RCP85_URL = "https://figshare.com/ndownloader/files/RCP85_FILE_ID",
-  FIGSHARE_AHOI_RASTER_URL = "https://figshare.com/ndownloader/files/AHOI_FILE_ID",
-  FIGSHARE_STOCK_AREAS_URL = "https://figshare.com/ndownloader/files/AREAS_FILE_ID",
-  FIGSHARE_STOCK_OBJECTS_URL = "https://figshare.com/ndownloader/files/STOCK_FILE_ID"
-)
-source("data_00_download_inputs.R")
-
-
