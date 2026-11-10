@@ -2,7 +2,7 @@
 
 download_inputs <- function(
     figshare_doi = "https://doi.org/10.6084/m9.figshare.34961302",
-    ices_url = "https://gis.ices.dk/shapefiles/ICES_rectangles.zip",
+    ices_url = "https://gis.ices.dk/shapefiles/ICES_StatRec_mapto_ICES_Areas.zip",
     figshare = TRUE, ices = TRUE, figshare_api_url = NULL) {
   
   library(jsonlite)
@@ -50,9 +50,11 @@ download_inputs <- function(
   options(timeout = max(1800, old_timeout))
   on.exit(options(timeout = old_timeout), add = TRUE)
   
-  download <- function(url, path, label) {
+  download <- function(url, path, label, method = "auto") {
     message("Downloading ", label, "...")
-    status <- utils::download.file(url, path, mode = "wb", quiet = TRUE)
+    status <- utils::download.file(
+      url, path, mode = "wb", quiet = TRUE, method = method
+    )
     if (status != 0L || !file.exists(path) ||
         is.na(file.info(path)$size) || file.info(path)$size <= 0) {
       stop("Download failed or produced an empty file: ", label)
@@ -154,7 +156,8 @@ download_inputs <- function(
   
   if (ices) {
     archive <- file.path(staging, "ices.zip")
-    download(ices_url, archive, "ICES statistical rectangles")
+    download(ices_url, archive, "ICES statistical rectangles",
+             method = "libcurl")
     
     unzip_program <- Sys.which("unzip")
     unzip_method <- if (nzchar(unzip_program)) unzip_program else "internal"
