@@ -24,13 +24,14 @@ rm(list = ls())
 library(earth)
 library(collapse)
 library(ggplot2)
+library(FLCore)
 
 # -------------------------- #
 # Configuration
 # -------------------------- #
 
 input_file <- "./data/Cod_Env_data.rda"
-output_dir <- "./results/model_01_fit_EMSRR"
+output_dir <- "./results/model_01_fit_EMSRR_SEG_ICES"
 ssb_column <- "ssb_lag1"
 expected_substocks <- c("Southern", "Northwestern", "Viking")
 holdout_n_years <- 10L # approximately a 75/25% split
@@ -74,138 +75,96 @@ dat <- dat[, required_columns]
 dat$variable <- as.character(dat$variable)
 dat$substock <- as.character(dat$substock)
 
+# ------------------------------- #
+# load truncated ICES refpts fits
+# ------------------------------- #
+
+# Load the full-data ICES benchmark SEG fits and their actual fit years.
+lut_env <- new.env()
+load("data/eqsim_lut.Rdata", envir = lut_env)
+eqsim_lut <- lut_env$eqsim_lut
+
+ices_pars <- list()
+ices_years <- list()
+ices_files <- list()
+
+for (stk in expected_substocks) {
+  file <- file.path("data", "SRRs",
+                    paste0("Cod_", stk, "_SRR_bootstrap.rda"))
+  if (!file.exists(file)) stop("Missing benchmark fit: ", file)
+  
+  e <- new.env()
+  load(file, envir = e)
+  
+  if (is.null(e$fits) || !"segreg" %in% names(e$fits)) {
+    stop(stk, ": no segreg fit in ", file)
+  }
+  
+  fit <- e$fits[["segreg"]]
+  p <- FLCore::params(fit)
+  
+  if (!all(c("a", "b") %in% dimnames(p)$params) ||
+      length(dimnames(p)$iter) != 1L) {
+    stop(stk, ": expected one fitted SEG parameter set.")
+  }
+  
+  pars <- c(a = as.numeric(p["a"]), b = as.numeric(p["b"]))
+  years <- as.integer(dimnames(FLCore::rec(fit))$year)
+  
+  if (any(!is.finite(pars)) || any(pars <= 0) ||
+      anyNA(years) || anyDuplicated(years)) {
+    stop(stk, ": invalid SEG parameters or recruitment years.")
+  }
+  
+  if (!all(years %in% eqsim_lut[[stk]]$srr_years)) {
+    stop(stk, ": saved fit years do not match eqsim_lut.")
+  }
+  if (!setequal(years, eqsim_lut[[stk]]$srr_years)) {
+    warning(stk, ": saved fit does not cover every year in eqsim_lut.")
+  }
+  
+  ices_pars[[stk]] <- pars
+  ices_years[[stk]] <- years
+  ices_files[[stk]] <- file
+  
+  message(stk, ": a = ", signif(pars["a"], 5),
+          ", b = ", signif(pars["b"], 5),
+          ", recruitment years = ", min(years), "-", max(years))
+}
+
+# Restrict environmental fitting to the recruitment years in each saved fit.
+dat <- do.call(rbind, lapply(expected_substocks, function(stk) {
+  dat[!is.na(dat$substock) & dat$substock == stk &
+        dat$year %in% ices_years[[stk]], , drop = FALSE]
+}))
+
 # -------------------------- #
 # Model and metric helpers
 # -------------------------- #
 
 source("./functions/calc.partial.effects.R")
 
-# R = a * min(SSB, b): a is the initial slope and b is the breakpoint.
+# Use the saved ICES parameters in every selection, holdout and full-data fit.
+# The existing call sites pass the substock through get_seg_bounds().
 get_seg_bounds <- function(substock, rec, ssb) {
-  bounds <- seg_bounds_by_substock[[substock]]
-  
-  # Default breakpoint range is the observed training SSB range. The slope
-  # bounds are deliberately broad and can be set per substock below.
-  if (is.null(bounds)) {
-    bounds <- list(
-      a = c(min(rec / ssb) / seg_upper_factor,
-            seg_upper_factor * max(rec / ssb)),
-      b = c(min(ssb), max(ssb))
-    )
-  }
-  
-  for (parameter in c("a", "b")) {
-    limit <- bounds[[parameter]]
-    if (length(limit) != 2L || any(!is.finite(limit)) ||
-        any(limit <= 0) || limit[1] >= limit[2]) {
-      stop("Invalid positive finite bounds for segmented parameter ",
-           parameter, " in ", substock, ".")
-    }
-  }
-  
-  bounds
+  p <- ices_pars[[substock]]
+  if (is.null(p)) stop("Missing ICES parameters for ", substock)
+  list(fixed_ices = p)
 }
 
 # Fit R = a * min(SSB, b) by minimizing absolute log-scale residuals.
 fit_seg <- function(rec, ssb, bounds, n_starts = seg_n_starts) {
-  keep <- is.finite(rec) & is.finite(ssb) & rec > 0 & ssb > 0
-  rec <- rec[keep]
-  ssb <- ssb[keep]
+  p <- bounds$fixed_ices
   
-  if (length(rec) < 3L) {
-    stop("At least three positive recruitment/SSB observations are required.")
+  if (is.null(p) || !all(c("a", "b") %in% names(p)) ||
+      any(!is.finite(p[c("a", "b")])) || any(p[c("a", "b")] <= 0)) {
+    stop("Missing or invalid fixed ICES SEG parameters.")
   }
-  if (n_starts < 2L) {
-    stop("Use at least two segmented starting points.")
-  }
-  
-  lower <- log(c(a = bounds$a[1], b = bounds$b[1]))
-  upper <- log(c(a = bounds$a[2], b = bounds$b[2]))
-  
-  # Optimize L1-loss on log-scale residuals, using log parameters to guarantee
-  # positive a and b.
-  objective <- function(log_par) {
-    log_pred <- log_par[1] + pmin(log(ssb), log_par[2])
-    sum(abs(log(rec) - log_pred)) # L1-loss
-  }
-  
-  # Data-informed slope and breakpoint starts.
-  b0 <- median(ssb)
-  a0 <- exp(median(log(rec) - log(pmin(ssb, b0))))
-  
-  # Keep the informed start and draw the remaining starts around it.
-  starts_raw <- cbind(
-    a = abs(rnorm(n_starts - 1L, mean = a0, sd = 1.8 * a0)),
-    b = pmax(
-      bounds$b[1],
-      abs(rnorm(n_starts - 1L, mean = b0, sd = 1.8 * b0))
-    )
-  )
-  starts_raw <- rbind(c(a = a0, b = b0), starts_raw)
-  
-  # Ensure every start lies within the same bounds used by BOBYQA.
-  starts_raw[, "a"] <- pmin(
-    bounds$a[2], pmax(bounds$a[1], starts_raw[, "a"])
-  )
-  starts_raw[, "b"] <- pmin(
-    bounds$b[2], pmax(bounds$b[1], starts_raw[, "b"])
-  )
-  
-  starts <- log(starts_raw)
-  
-  fits <- lapply(seq_len(nrow(starts)), function(i) {
-    tryCatch(
-      minqa::bobyqa(
-        par = starts[i, ],
-        fn = objective,
-        lower = lower,
-        upper = upper,
-        control = list(maxfun = seg_maxfun)
-      ),
-      error = function(e) e
-    )
-  })
-  
-  failed <- vapply(fits, inherits, logical(1), what = "error")
-  valid <- which(!failed)
-  valid <- valid[vapply(fits[valid], function(fit) {
-    is.finite(fit$fval) && all(is.finite(fit$par))
-  }, logical(1))]
-  
-  if (!length(valid)) {
-    details <- unique(vapply(fits[failed], conditionMessage, character(1)))
-    stop(
-      "All bounded multistart BOBYQA fits failed or were non-finite.",
-      if (length(details)) paste0(" ", paste(details, collapse = "; ")) else ""
-    )
-  }
-  
-  converged <- valid[vapply(fits[valid], function(fit) {
-    isTRUE(fit$ierr == 0)
-  }, logical(1))]
-  
-  if (!length(converged)) {
-    warning("No BOBYQA start reported normal convergence; using the best ",
-            "finite solution.")
-    converged <- valid
-  }
-  
-  best_index <- converged[which.min(vapply(
-    fits[converged],
-    function(fit) fit$fval,
-    numeric(1)
-  ))]
-  best <- fits[[best_index]]
   
   list(
-    a = unname(exp(best$par[1])),
-    b = unname(exp(best$par[2])),
-    objective = best$fval,
-    convergence = best$ierr,
-    bounds = bounds,
-    n_starts = nrow(starts),
-    best_start = best_index,
-    optimizer = best
+    a = unname(p["a"]),
+    b = unname(p["b"]),
+    bounds = bounds
   )
 }
 
@@ -1051,8 +1010,11 @@ for(substk in expected_substocks){
   SR.model$vars = c(ssb_column,env.var)
   SR.model$years = fit.data$year
   SR.model$observed = fit.data$rec
-  SR.model$optimization = sr.fit[c("objective","convergence","bounds",
-                                   "n_starts","best_start")]
+  SR.model$optimization = list(
+    method = "fixed_ICES_FLSRTMB",
+    source = ices_files[[substk]],
+    recruitment_years = ices_years[[substk]]
+  )
   
   # Calculate fitted recruitment and residual SD over all available years.
   newdata = data.frame(fit.data[[ssb_column]],fit.data$value,
@@ -1080,4 +1042,4 @@ for(substk in expected_substocks){
 }
 
 save(Cod.EMSRR,
-     file = file.path(output_dir,paste0("Cod.EMSRR_",sr.type,".RData")))
+     file = file.path(output_dir, "Cod.EMSRR_SEG_trunc_ICES.RData"))
