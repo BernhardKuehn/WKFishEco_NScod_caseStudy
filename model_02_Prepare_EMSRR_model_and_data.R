@@ -17,22 +17,25 @@ library(minqa)
 # ------------------------- #
 
 # loop over the two different SR-types
-types = c("BH","SEG")
+types = c("BH","SEG","SEG_trunc_ICES")
 
 for(sr.type in types){
 #sr.type = "BH" # change to "SEG" for the segmented models
 
-if(!sr.type %in% c("BH","SEG")){
-  stop("sr.type must be BH or SEG.")
+if(!sr.type %in% c("BH","SEG","SEG_trunc_ICES")){
+  stop("sr.type must be BH, SEG or SEG_trunc_ICES.")
 }
 
 model.file = file.path(
   "./data/EMSRRs",paste0("Cod.EMSRR_",sr.type,".RData")
 )
-selection.file = file.path(
+selection.file = ifelse(sr.type %in% c("BH","SEG"),file.path(
   "./results/model_01_fit_EMSRR",
   paste0(sr.type,"_selected_emsrr_models.rds")
-)
+),file.path(
+  "./results/model_01_fit_EMSRR_SEG_ICES",
+  paste0("SEG","_selected_emsrr_models.rds")
+)) 
 fit.data.file = "./data/Cod_Env_data.rda"
 stock.file = "./data/stock/cod46a7d20_FLstockObjects_assessment_2026.Rdata"
 env.file = "./data/Env/processed/bottomT_projections/bottomT_historical_projection_summaries.rds"
@@ -391,10 +394,49 @@ for(substk in substocks){
   # Refit the baseline and selected MARS form on all original fit years.
   opt = model$SR.model$optimization
   
+  if (sr.type == "BH") {
+    # Reconstruct the stock data used to set model_01's full-data bounds.
+    stock <- unique(fit.data[fit.data$substock == substk,
+                             c("year", "rec", "ssb_lag1"), drop = FALSE])
+    
+    stock <- stock[complete.cases(stock) &
+                     is.finite(stock$year) &
+                     is.finite(stock$rec) & stock$rec > 0 &
+                     is.finite(stock$ssb_lag1) & stock$ssb_lag1 > 0,
+                   , drop = FALSE]
+    
+    if (!nrow(stock)) stop(substk, ": no valid stock data.")
+    
+    Smax <- max(stock$ssb_lag1)
+    expected <- list(
+      a = c(0.01 * min(stock$rec), 100 * max(stock$rec)),
+      b = c(Smax * (1 / 0.85 - 1), Smax * (1 / 0.75 - 1))
+    )
+    
+    if (!is.list(opt$bounds) ||
+        !isTRUE(all.equal(opt$bounds$a, expected$a,
+                          tolerance = 1e-8, check.attributes = FALSE)) ||
+        !isTRUE(all.equal(opt$bounds$b, expected$b,
+                          tolerance = 1e-8, check.attributes = FALSE))) {
+      stop(substk, ": saved BH bounds differ from the 75–85% constraints. ",
+           "Rerun model_01 and check that model_02 loads the new fit.")
+    }
+    
+    cat(substk, "| BH bounds verified; Smax =", Smax, "\n")
+  }
+  
+  
+  if(sr.type %in% c("BH","SEG")){
   refit = refit.baseline(
     d$rec,d$ssb_lag1,opt$bounds,opt$n_starts,
     sr.type,refit.maxfun
   )
+  } else if(sr.type == "SEG_trunc_ICES"){
+    refit = list(
+      params = model$SR.model[[sr.name]]$params,
+      optimization = opt
+    )
+  }
   
   model$SR.model[[sr.name]]$params = refit$params
   baseline = model$SR.model[[sr.name]]$model(refit$params,d$ssb_lag1)

@@ -132,12 +132,6 @@ for (stk in expected_substocks) {
           ", recruitment years = ", min(years), "-", max(years))
 }
 
-# Restrict environmental fitting to the recruitment years in each saved fit.
-dat <- do.call(rbind, lapply(expected_substocks, function(stk) {
-  dat[!is.na(dat$substock) & dat$substock == stk &
-        dat$year %in% ices_years[[stk]], , drop = FALSE]
-}))
-
 # -------------------------- #
 # Model and metric helpers
 # -------------------------- #

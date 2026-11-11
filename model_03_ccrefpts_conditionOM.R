@@ -86,7 +86,7 @@ if(!all(names(stks) %in% rownames(BRPs))){
 }
 
 # 3. loop through substocks ---------
-srr.type = c("BH","SEG")
+srr.type = c("BH","SEG","SEG_trunc_ICES")
 
 for(srt in srr.type){ # loop through srr types
   
