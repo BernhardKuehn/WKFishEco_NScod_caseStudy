@@ -75,28 +75,49 @@ dat$substock <- as.character(dat$substock)
 source("./functions/calc.partial.effects.R")
 
 # define bounds for the BH parameter search
+# get_bh_bounds <- function(substock, rec, ssb) {
+#   bounds <- bh_bounds_by_substock[[substock]]
+#   
+#   # Fallbacks preserve the former lower bound for b and add broad finite
+#   # upper limits so BOBYQA can work in a bounded parameter space.
+#   if (is.null(bounds)) {
+#     bounds <- list(
+#       a = c(max(rec) * (1 + 1e-6), bh_upper_factor * max(rec)),
+#       b = c(0.01 * min(ssb), bh_upper_factor * max(ssb))
+#     )
+#   }
+#   
+#   for (parameter in c("a", "b")) {
+#     limit <- bounds[[parameter]]
+#     if (length(limit) != 2L || any(!is.finite(limit)) ||
+#         any(limit <= 0) || limit[1] >= limit[2]) {
+#       stop("Invalid positive finite bounds for BH parameter ",
+#            parameter, " in ", substock, ".")
+#     }
+#   }
+#   
+#   bounds
+# }
+
+# try more restrictive bounds for fitting
 get_bh_bounds <- function(substock, rec, ssb) {
-  bounds <- bh_bounds_by_substock[[substock]]
+  rec <- rec[is.finite(rec) & rec > 0]
+  ssb <- ssb[is.finite(ssb) & ssb > 0]
   
-  # Fallbacks preserve the former lower bound for b and add broad finite
-  # upper limits so BOBYQA can work in a bounded parameter space.
-  if (is.null(bounds)) {
-    bounds <- list(
-      a = c(max(rec) * (1 + 1e-6), bh_upper_factor * max(rec)),
-      b = c(0.01 * min(ssb), bh_upper_factor * max(ssb))
-    )
+  if (!length(rec) || !length(ssb)) {
+    stop("No positive recruitment or SSB values for ", substock)
   }
   
-  for (parameter in c("a", "b")) {
-    limit <- bounds[[parameter]]
-    if (length(limit) != 2L || any(!is.finite(limit)) ||
-        any(limit <= 0) || limit[1] >= limit[2]) {
-      stop("Invalid positive finite bounds for BH parameter ",
-           parameter, " in ", substock, ".")
-    }
-  }
+  # At the largest observed SSB, require the BH curve to have
+  # reached between 75% and 85% of its asymptote.
+  Smax <- max(ssb)
+  b_min <- Smax * (1 / 0.85 - 1)
+  b_max <- Smax * (1 / 0.75 - 1)
   
-  bounds
+  list(
+    a = c(0.01 * min(rec), 100 * max(rec)),
+    b = c(b_min, b_max)
+  )
 }
 
 
