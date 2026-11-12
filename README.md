@@ -16,170 +16,212 @@ reference-point workflow.
 
 ## Workflow overview
 
-| Step | Script | Purpose |
-|------------------------|------------------------|------------------------|
-| Historical environment | `data_00.a_Handle_AHOI_data.R` | Process AHOI NetCDF data into monthly environmental rasters. |
-| Historical substock summaries | `data_01_prepare_bottomT_by_stubstock.R` | Calculate annual bottom-temperature means and spatial clusters for each substock. |
-| Stock-environment join | `data_02_join_bottomT_with_substock.R` | Join recruitment, lagged SSB, and lagged historical environmental covariates. |
-| EMSRR fitting | `model_01_fit_EMSRR_BH.R` and `model_01_fit_EMSRR_Segreg.R` | Select and fit Beverton-Holt and segmented EMSRRs. |
-| Projection bias correction | `data_00.b_Bias_correct_projections.R` | Bias-correct POLCOMS-ERSEM bottom-temperature projections against AHOI. |
-| Projection realizations | `data_00.c_Generate_projection_realisations_BVAR_500.R` | Fit spatial BVARs and generate projected bottom-temperature realizations. |
-| Historical-projection comparison | `data_00.d_Join_historical_and_projection_pattern.R` | Summarize history and projections on a common spatial footprint. |
-| Reference-point lookup tables | `data_03_ccrefpts_make_lookup_tables.R` | Create EqSim settings and current biological reference-point tables. |
-| Model and data preparation | `model_02_Prepare_EMSRR_model_and_data.R` | Refit selected EMSRRs on common-footprint history and prepare stock and environmental inputs. |
-| Operating-model conditioning | `model_03_ccrefpts_conditionOM.R` | Create operating models for each substock, SR type, and climate setting. |
-| Reference-point simulations | `model_04_ccrefpts_runRefptSim.R` | Simulate fishing-mortality targets and calculate candidate reference points. |
+The diagram summarizes the scientific workflow. Script names and
+run-order details are listed below.
 
-The `functions/` directory contains helper functions for spatial
-clustering, spatial BVAR, partial-effect, and simulation utility
-functions.
+![Framework for estimating reference points with environmental
+influence](docs/images/workflow-framework.png)
 
-## Requirements
+*Conceptual framework for combining stock data, environmental
+observations and projections, EMSRRs, and simulations for
+reference-point estimation. The repository implements the workflow in
+the scripts described below.*
 
-### Initial input archive
+## Repository layout
 
-Input data are not included in the repository, and a Figshare archive for
-this case study has not yet been configured here. Once the source files
-have been assembled and uploaded as a ZIP to Figshare, set its **file
-download URL** (including the private-link query if applicable) and run
-the downloader from the repository root:
+Run scripts from the repository root so their relative paths resolve
+correctly.
+
+``` text
+.
+├── data_00.*.R                         # Input processing and projections
+├── data_01_prepare_bottomT_by_stubstock.R
+├── data_02_join_bottomT_with_substock.R
+├── data_03_ccrefpts_make_lookup_tables.R
+├── model_01_fit_EMSRR_*.R              # EMSRR fitting and selection
+├── model_02_Prepare_EMSRR_model_and_data.R
+├── model_03_ccrefpts_conditionOM.R
+├── model_04_ccrefpts_runRefptSim*.R
+├── output_*.R                          # Results and diagnostic plots
+├── functions/                          # Shared analysis helpers
+├── data/                               # External inputs and generated data
+├── model/                              # Prepared models and simulations
+└── results/                            # Model-selection outputs and plots
+```
+
+Input data and most generated products are not included in the
+repository. The scripts create intermediate and result files under
+`data/`, `model/`, and `results/`.
+
+## Script guide
+
+### 1. Prepare historical data
+
+| Script | Purpose |
+|------------------------------------|------------------------------------|
+| `data_00.a_Handle_AHOI_data.R` | Process monthly AHOI NetCDF files into environmental rasters cutted to the region of interest and extract bottom temperature (and other variables as well if wanted) |
+| `data_01_prepare_bottomT_by_stubstock.R` | Calculate annual bottom-temperature fields, substock time series, and spatial clusters. |
+| `data_02_join_bottomT_with_substock.R` | Join recruitment and lagged SSB with lagged historical environmental covariates. |
+
+### 2. Fit and select EMSRRs
+
+| Script | Purpose |
+|------------------------------------|------------------------------------|
+| `model_01_fit_EMSRR_Segreg.R` | Fit and select segmented EMSRRs. |
+| `model_01_fit_EMSRR_Segreg_trunc.ICES.SRR.R` | Fit the truncated-ICES segmented EMSRR variant. |
+| `output_05_plot_spatial_clusters.R` | Plot spatial cluster maps and, when available, the spatial representation of the covariates selected by each model. |
+
+The fitting scripts write model-selection summaries and other outputs
+under `results/model_01_fit_EMSRR/` and
+`results/model_01_fit_EMSRR_SEG_ICES/`. `output_05` uses the generated
+spatial cluster raster and selection summaries; run the relevant model
+scripts before plotting selected covariates.
+
+### 3. Prepare climate projections and reference-point inputs
+
+| Script | Purpose |
+|------------------------------------|------------------------------------|
+| `data_00.b_Bias_correct_projections.R` | Bias-correct POLCOMS-ERSEM bottom-temperature projections against AHOI. |
+| `data_00.c_Generate_projection_realisations_BVAR_500.R` | Fit spatial BVARs and generate projected bottom-temperature realizations. |
+| `data_00.d_Join_historical_and_projection_pattern.R` | Summarize historical and projected bottom temperature on a common spatial footprint. |
+| `data_03_ccrefpts_make_lookup_tables.R` | Create EqSim settings and current biological reference-point tables. |
+| `model_02_Prepare_EMSRR_model_and_data.R` | Refit selected EMSRRs on common-footprint history and prepare stock and environmental inputs. |
+
+### 4. Condition operating models and simulate reference points
+
+| Script | Purpose |
+|------------------------------------|------------------------------------|
+| `model_03_ccrefpts_conditionOM.R` | Create operating models for each substock, SR type, and climate setting. |
+| `model_04_ccrefpts_runRefptSim.R` | Simulate fishing-mortality targets and calculate candidate reference points. |
+| `model_04_ccrefpts_runRefptSim_truncICES.R` | Run the corresponding truncated-ICES reference-point simulations. |
+
+The `functions/` directory contains shared utilities, including spatial
+clustering, spatial BVAR, partial-effect, and simulation functions.
+
+## Spatial bottom-temperature patterns
+
+`data_01_prepare_bottomT_by_stubstock.R` calculates annual
+bottom-temperature fields by substock and clusters cells by their
+temporal patterns. Clustering does not enforce spatial connectivity;
+inspect the resulting maps and diagnostics.
+
+The figure below shows the selected spatial cluster map for each
+substock. Each color represents a cluster; the number of clusters may
+differ among substocks.
+
+![Selected spatial bottom-temperature clusters for the Northwestern,
+Southern, and Viking
+substocks](docs/images/bottomT-clusters-per-substock.png)
+
+*Spatial clustering of annual bottom-temperature patterns by substock.*
+
+The script writes these products under `data/Env/processed/`:
+
+-   `bottomT_yr_by_cod_substock.rda`
+-   `Cluster_bottomT_yr_by_cod_substock.rda`
+-   `Spatial_bottomT_yr_by_cod_substock.rda`
+-   `SpatialCluster_bottomT_yr_by_cod_substock.rda`
+
+`output_05_plot_spatial_clusters.R` plots the cluster maps and can
+compare them with the covariates selected by the `Segreg` and
+`Segreg_trunc_ICES` models. For best results, run it from the repository
+root after generating the spatial products and model-selection
+summaries. The plots can be saved under `output/figs` and the script can
+also capture base-R plots for replay in an R session.
+
+## Data and generated products
+
+### External inputs
+
+Input datasets are not included in this repository. A Figshare archive
+for the case study has been configured here:
+<https://doi.org/10.6084/m9.figshare.34961302> For the automatic
+download run the downloader-Script:
 
 ``` r
-Sys.setenv(FIGSHARE_INPUT_URL = "https://figshare.com/ndownloader/files/REPLACE_WITH_FILE_ID")
 source("data_00_download_inputs.R")
 ```
 
-Alternatively, run `FIGSHARE_INPUT_URL='https://...' Rscript
-data_00_download_inputs.R` from a shell. Use the download link for this
-case study, not the unrelated tutorial example. The downloader uses base
-R and, when available, the Info-ZIP `unzip` utility for ZIP64 support.
-Without that utility, ZIP64 archives are rejected because R's internal
-unzip cannot reliably extract individual members of 4 GiB or larger.
-The downloader extracts to a temporary directory, validates the archive
-layout, and installs the inputs under `data/`. Allow enough
-temporary disk space for both the ZIP and its extracted contents as well
-as space for the installed files; set `TMPDIR` before starting R if
-needed. A repeat run skips identical files and stops rather than
-overwriting differing files.
-
-The ZIP must contain the following paths directly at its root, without a
-wrapping folder. These are the external source datasets needed by the
-analysis scripts:
+The ZIP should contain the following paths directly at its root, without
+a wrapping folder:
 
 | Input | Expected location |
 |------------------------------------|------------------------------------|
-| Monthly AHOI v23.05 NetCDF files | `data/Env/AHOI/v23.05/*.nc` |
+| Monthly bottom T AHOI v23.05 files | `data/Env/processed/AHOI_BottomTemp_raster_1945_2024.tif` |
 | ICES rectangle shapefile and companion files | `data/ICES_stat_rect/StatRec_map_Areas_Full_20170124.{shp,shx,dbf,prj}` |
 | Substock-area lookup | `data/stock/Area_NSCOD3_table_6a_inshore_offshore.xlsx` |
 | Assessment stock objects | `data/stock/cod46a7d20_FLstockObjects_assessment_2026.Rdata` |
 | RCP4.5 POLCOMS-ERSEM bottom temperature | `data/Env/POLCOMS-ERSEM/POLCOM_ERSEM_GreaterNorthSea_rcp45_BottomTemp_raster_2006_2099.RData` |
 | RCP8.5 POLCOMS-ERSEM bottom temperature | `data/Env/POLCOMS-ERSEM/POLCOM_ERSEM_GreaterNorthSea_rcp85_BottomTemp_raster_2006_2099.RData` |
 
-Include all monthly AHOI files, directly in the indicated directory.
-The first run of digits in each filename must be its six-digit `YYYYMM`
-date, as expected by `data_00.a`. Each file must contain the coordinates,
-depth and environmental variables used by that script. Include any
-additional shapefile sidecars with the same basename. The assessment file
-must contain the substock list used by the stock scripts; the two projection
-files must contain the named raster objects expected by `data_00.b` and
-be self-contained rather than referencing unavailable local raster files.
+The original monthly AHOI files available for the North East Atlantic
+are available on request, as those were too big to store directly. Those
+can be processed with `data_00_Handle_AHOI_data.R`. If you already
+downloaded `data/Env/processed/AHOI_BottomTemp_raster_1945_2024.tif`
+than there is no need to run `data_00_Handle_AHOI_data.R`.
 
-Do not include generated rasters, model fits, lookup tables, or simulations
-in this archive: the workflow creates those from the source data. The
-downloader checks filenames, basic completeness, and extracted file sizes;
-it does not validate scientific content or provenance. Confirm the
-coverage, data access permissions, provenance, and licensing before
-obtaining, uploading, or sharing the inputs. A private Figshare link
-should be kept out of committed files.
+### Generated data and model outputs
 
-For example, from a directory containing the source `data/` tree, the
-following creates the expected layout using the `zip` command:
+The analysis scripts generate intermediate products under `data/` and
+prepared models and simulations under `model/`. Important outputs
+include:
 
-``` sh
-zip -r ../wkfisheco_inputs.zip \
-  data/Env/AHOI/v23.05/*.nc \
-  data/ICES_stat_rect/StatRec_map_Areas_Full_20170124.* \
-  data/stock/Area_NSCOD3_table_6a_inshore_offshore.xlsx \
-  data/stock/cod46a7d20_FLstockObjects_assessment_2026.Rdata \
-  data/Env/POLCOMS-ERSEM/POLCOM_ERSEM_GreaterNorthSea_rcp45_BottomTemp_raster_2006_2099.RData \
-  data/Env/POLCOMS-ERSEM/POLCOM_ERSEM_GreaterNorthSea_rcp85_BottomTemp_raster_2006_2099.RData
-```
+-   `data/Cod_Env_data.rda`: joined stock and environmental data
+    (`env_stk`).
+-   `results/model_01_fit_EMSRR/`:segmented regression model-selection
+    summaries, holdout metrics, predictions, partial effects, and plots.
+-   `results/model_01_fit_EMSRR_SEG_ICES/`: truncated-ICES segmented
+    model-selection outputs.
+-   `data/EMSRRs/`: selected EMSRR model objects.
+-   `data/Env/processed/bottomT_projections/`: historical and projection
+    summaries and common-footprint diagnostics.
+-   `model/`: prepared models, conditioned operating models, and
+    simulation outputs.
 
-The AHOI processing script describes historical data for 1948-2024,
-whereas the later scripts expect a raster named
-`AHOI_BottomTemp_raster_1945_2024.tif`. The generated filename reflects
-the actual input dates. The downloader warns about gaps and differing
-start/end years, but cannot resolve this discrepancy. Check the coverage
-and filename, and update the paths and year assumptions in the later
-scripts if necessary before running the analysis.
-
-### R packages and environment
-
-There is no package manifest or lockfile. Package versions are therefore
-not pinned. Dependencies include:
-
--   Spatial and environmental processing: `raster`, `terra`, `RNetCDF`,
-    `sf`, `readxl`, `marmalaid`, `maps`, `maptools`, `rgeos`,
-    `rnaturalearth`, and `mclust`.
--   Projection and parallel processing: `BVAR`, `coda`, `corrplot`,
-    `tsDyn`, `Rcpp`, `Rcpp2doParallel`, `foreach`, `doParallel`, and
-    `doSNOW`.
--   Model fitting and simulation: `earth`, `minqa`, `collapse`,
-    `ggplot2`, `DescTools`, `stringr`, `dplyr`, `data.table`, `FLCore`,
-    `FLasherEMSRR`, and `mseEMSRR`.
-
-Other dependencies are called by individual scripts and helper
-functions. Some older spatial packages may need a compatible R
-environment. Install and validate the required packages in a
-project-specific library, and record the R and package versions used.
-
-**For `model_03` and `model_04`, start a fresh R session without the
-original `FLasher` or `mse` packages attached.** The scripts warn that
-those packages can conflict with classes provided by `FLasherEMSRR` and
-`mseEMSRR`.
+Review intermediate products and their coverage before continuing
+through the workflow.
 
 ## Running the workflow
 
-Run scripts from the repository root so relative paths resolve
-correctly. Several scripts begin with `rm(list = ls())`, which clears
-objects from the current workspace. Use a fresh R session and save any
-work beforehand.
-
-The following order shows the dependencies. Existing intermediate
-products can be reused when they are compatible with the current scripts
-and inputs.
+Run scripts from the repository root. Several scripts begin with
+`rm(list = ls())`, which clears objects in the current R workspace. Use
+a fresh R session and save any work beforehand.
 
 ``` r
-# Historical environmental data and stock-environment join
+# Historical environmental processing and stock-environment join
 source("data_00.a_Handle_AHOI_data.R")
 source("data_01_prepare_bottomT_by_stubstock.R")
 source("data_02_join_bottomT_with_substock.R")
 
-# Select and fit EMSRRs
+# Fit/select EMSRRs
 source("model_01_fit_EMSRR_BH.R")
 source("model_01_fit_EMSRR_Segreg.R")
+source("model_01_fit_EMSRR_Segreg_trunc.ICES.SRR.R")
+
+# Optional spatial-cluster plots; requires spatial products and
+# model-selection summaries for the selected-covariate comparison
+source("output_05_plot_spatial_clusters.R")
 
 # Climate projections and common-footprint summaries
 source("data_00.b_Bias_correct_projections.R")
 source("data_00.c_Generate_projection_realisations_BVAR_500.R")
 source("data_00.d_Join_historical_and_projection_pattern.R")
 
-# Lookup tables and reference-point inputs
+# Reference-point inputs and operating models
 source("data_03_ccrefpts_make_lookup_tables.R")
 source("model_02_Prepare_EMSRR_model_and_data.R")
 
 # In a fresh session without FLasher or mse attached:
 source("model_03_ccrefpts_conditionOM.R")
 
-# Attach data.table for the unqualified rbindlist() calls in model_04.
+# Attach data.table for unqualified rbindlist() calls in model_04.
 library(data.table)
 source("model_04_ccrefpts_runRefptSim.R")
 ```
 
-Run the input downloader above before the workflow. The analysis scripts
-do not install packages. Some contain plots and interactive diagnostics,
-and not every input is validated in advance. Review configuration and
-intermediate outputs before running the full workflow.
+The exact order and inputs for the truncated-ICES workflow may differ
+from the standard workflow; review that script's configuration before
+running it. Some scripts contain interactive diagnostics and plots.
 
 Processing can require substantial time, memory, and disk space. In
 particular:
@@ -193,183 +235,90 @@ particular:
     of 2099.
 -   `model_04` currently requests 25 workers. Adjust `ncores` in the
     script to suit the available machine.
+## Method notes and interpretation
 
-## Historical environmental data
+### Historical environment and stock alignment
 
-`data_00.a` reads the AHOI fields and writes monthly rasters under
-`data/Env/processed/`. Its lookup table uses a 10 m depth limit for the
-`Temperature` surface field. Bottom-temperature summaries use the
-`Temperature_Bottom` field.
-
-`data_01` averages monthly bottom temperature to annual fields,
-constructs the substock regions from ICES rectangles and the area
-lookup, and calculates substock means and spatial clusters. Clustering
-uses temporal patterns in complete historical grid cells; it does not
-enforce spatial connectivity. Inspect the selected cluster maps and
-diagnostics.
-
-The script saves these products under `data/Env/processed/`:
-
--   `bottomT_yr_by_cod_substock.rda`
--   `Cluster_bottomT_yr_by_cod_substock.rda`
--   `Spatial_bottomT_yr_by_cod_substock.rda`
--   `SpatialCluster_bottomT_yr_by_cod_substock.rda`
-
-If spatial products were created with an older script that saved
-`SpatRaster` external pointers directly, rerun the current `data_01`
-script. The current script saves portable in-memory raster fields and
-cluster maps.
-
-## Stock-environment alignment and EMSRR fitting
+`data_01` calculates annual bottom-temperature fields and constructs the
+substock regions from ICES rectangles and the area lookup. It calculates
+substock averages and spatial clusters from complete historical grid
+cells. The selected cluster count is based on temporal-pattern
+stability; the clustering does not enforce spatial connectivity.
 
 `data_02` extracts recruitment and SSB from the FLCore stock objects. It
-uses the recruitment age to lag SSB and shifts the environmental series
-by one year before joining by year and substock. Check substock labels,
-lag conventions, missing values, and retained years before fitting.
+lags SSB by recruitment age and shifts environmental series by one year
+before joining by year and substock. Check substock labels, lag
+conventions, missing values, and retained years before fitting.
 
-The joined table is saved as `data/Cod_Env_data.rda`, containing
-`env_stk`.
+### EMSRR model selection
 
-The two `model_01` scripts fit Beverton-Holt (`BH`) and segmented
-(`SEG`) stock-recruitment baselines with MARS environmental effects. For
-each substock they use bootstrap out-of-bag performance to select a
-candidate environmental variable and MARS form. The latest 10 distinct
-calendar years are reserved for holdout evaluation; earlier complete
-observations are used for training.
+The BH and segmented model scripts use bootstrap out-of-bag performance
+to select a candidate environmental variable and MARS form for each
+substock. The latest 10 distinct calendar years are reserved for holdout
+evaluation; earlier complete observations are used for training. The
+holdout scores are for training-only model selection and do not
+constitute an independent evaluation of the final full-data refits.
 
-Outputs include selection summaries, holdout metrics and predictions,
-partial effects, plots, and selected model objects under
-`results/model_01_fit_EMSRR/`. Each script also refits its selected
-model on all available fitting years and saves it under:
+`model_02` uses the selected variable and MARS form to refit models
+using common-footprint historical environmental values for the original
+fitting years. Model selection and holdout metrics are not recalculated
+on that common footprint.
 
--   `data/EMSRRs/Cod.EMSRR_BH.RData`
--   `data/EMSRRs/Cod.EMSRR_SEG.RData`
+### Projections and common footprint
 
-The holdout scores refer to the training-only evaluation, not an
-independent evaluation of the full-data refits.
-
-## Climate projections and the common footprint
-
-`data_00.b` bias-corrects the POLCOMS-ERSEM projections. `data_00.c`
-fits a spatial BVAR and generates monthly realizations for RCP4.5 and
-RCP8.5. The realization files are written under
-`data/Env/POLCOMS-ERSEM_biasRM_BVARsims/bottomT/`, with names such as
-`POLCOM_ERSEM_rcp45_bottomT_1.tiff`.
-
-`data_00.d` uses historical fields and fixed historical cluster maps to
-calculate comparable annual historical and projected series. It requires
-matching longitude/latitude CRS, resolution, and grid origin, plus
-ordered, complete monthly projection years. It does not resample or
-bias-correct the inputs.
-
-The common footprint retains cells with complete historical annual
-values and finite monthly values in **every** realization of both
+The projection workflow bias-corrects POLCOMS-ERSEM projections,
+generates stochastic realizations with spatial BVARs, and summarizes
+historical and projected annual bottom temperature on a common spatial
+footprint. The common footprint retains cells with complete historical
+annual values and finite monthly values in every realization of both
 scenarios. Substock means are unweighted; cluster means use fixed
-`raster::area()` weights. Inspect coverage and historical comparisons:
-restricting the footprint can change the covariates used for model
-fitting.
+`raster::area()` weights.
 
-Outputs under `data/Env/processed/bottomT_projections/` include:
+History and projections remain separate in the summary output; they are
+not spliced or lagged there. Inspect coverage, historical comparisons,
+and overlap diagnostics. Restricting the footprint can change
+environmental covariates.
 
--   `bottomT_historical_projection_summaries.rds`: historical summaries,
-    common masks, coverage, overlap diagnostics, projection tables, and
-    file information.
--   `historical_comparison.csv` and `common_footprint_coverage.csv`.
--   `historical_projection_overlap.csv` and
-    `historical_projection_comparison.pdf`.
+### Reference-point simulations
 
-History and projections remain separate in this output; they are not
-spliced or lagged. Bias correction was performed before BVAR simulation,
-so overlap diagnostics do not guarantee that each stochastic realization
-matches history.
-
-## Reference-point inputs and operating models
-
-`data_03` writes:
-
--   `data/eqsim_lut.Rdata`, containing substock-specific EqSim settings.
--   `data/BRPs.Rdata`, containing the current biological reference-point
-    table.
-
-The script identifies ICES 2026 advice and reference-point scripts as
-its sources. Review those values and assumptions against the intended
-assessment.
-
-`model_02` reads the selected BH and SEG models, stock data, historical
-common-footprint summaries, and both projection scenarios. For each
-substock and SR type, it retains the selected variable and MARS form,
-then refits the baseline and environmental effect using common-footprint
-historical values for the original fitting years.
-
-It applies a one-year environmental lag to history and projections,
-keeps them separate, and checks that the packaged historical inputs
-reproduce the refitted predictions. Model selection and holdout metrics
-still refer to the original historical footprint; they are not
-recalculated on the common footprint.
-
-Outputs are:
-
--   `data/EMSRRs/Cod.EMSRR_<BH|SEG>_common.RData`: common-footprint
-    refits.
--   `model/Cod.EMSRR_<BH|SEG>_model_and_data.RData`: prepared models,
-    stock data, historical covariates, and projections.
-
-`model_03` uses these files to condition operating models for the three
-substocks and both SR types. Its current setup uses a single fitted
-model rather than bootstrapped model versions, with autocorrelated
-lognormal recruitment deviances.
-
-For each substock and SR type, it creates seven climate settings: a
-no-climate- change setting and RCP4.5/RCP8.5 settings for the 2030,
-2040, and 2050 periods. The no-climate-change series is derived from
-RCP4.5 variability with its median trend removed and a historical mean
-offset. The RCP period settings similarly remove the annual median trend
-and use the respective decadal mean level.
-
-Conditioned inputs are saved as:
-
-``` text
-model/Cod_<substock>_EMSRR_<BH|SEG>_ccrefpts_input.rda
-```
-
-## Reference-point simulations
-
-`model_04` loads the conditioned operating models and runs simulations
-over target fishing mortalities from 0 to 1 in steps of 0.02. It first
-runs with a zero biomass trigger, then runs with a biomass-trigger
-harvest control rule. It derives candidate Fmsy, Fmsy-range, Btrigger,
-Blim, and Fpa values from the simulated outputs.
-
-The script creates `model/refpts/` and saves one file per substock, SR
-type, climate scenario, and period:
-
-``` text
-model/refpts/<substock>_<BH|SEG>_<scenario>_<period>_EMSRR_model.rda
-```
-
-Each file contains `df`, `df2`, and `tt`: the simulation summaries for
-the two runs and their recorded elapsed time. The combined
-reference-point tables are saved as `newBRPs` and `newBRPs_list` in:
-
-``` text
-model/newBRPs_EMSRR_model.rda
-```
+`model_03` conditions operating models for the three substocks and
+configured SR types and climate settings. `model_04` simulates target
+fishing mortalities and derives candidate reference-point values from
+the simulation outputs.
 
 These are candidate calculations, not validated management reference
-points. In particular, review the following implementation choices:
+points. Review scenario construction, projection coverage, stochastic
+assumptions, units, and implementation choices.
 
--   `ey <- 20` is used with the inclusive range `(fy - ey):fy`, which
-    selects 21 calendar years.
--   The reported Fmsy range is based on predicted landings above 95% of
-    the maximum; it is not a statistical confidence interval.
--   Fpa uses a smoothed curve of per-iteration fifth percentiles over
-    the evaluation years, compared with `0.3 * Bmsy`. Verify that this
-    matches the intended risk definition. Fpa can be missing if no point
-    on the grid crosses the threshold.
--   `Bpa`, `Flim`, and `Fmgt` are not newly calculated by this script.
--   Check scenario construction, projection coverage, stochastic
-    assumptions, units, and the behavior of parallel workers on the
-    target platform.
+## Requirements
+
+There is no package manifest or lockfile, so package versions are not
+pinned. Dependencies include:
+
+-   Spatial and environmental processing: `raster`, `terra`, `RNetCDF`,
+    `sf`, `readxl`, `marmalaid`, `maps`, `maptools`, `rgeos`,
+    `rnaturalearth`, and `mclust`.
+-   Projection and parallel processing: `BVAR`, `coda`, `corrplot`,
+    `tsDyn`, `Rcpp`, `Rcpp2doParallel`, `foreach`, `doParallel`, and
+    `doSNOW`.
+-   Model fitting and simulation: `earth`, `minqa`, `collapse`,
+    `ggplot2`, `DescTools`, `stringr`, `dplyr`, `data.table`, `FLCore`,
+    `FLasherEMSRR`, and `mseEMSRR`.
+
+Other dependencies may be used by individual scripts and helper
+functions. Some older spatial packages may need a compatible R
+environment. Install and validate dependencies in a project-specific
+library, and record the R and package versions used.
+
+For `model_03` and `model_04`, start a fresh R session without the
+original `FLasher` or `mse` packages attached; they may conflict with
+classes from `FLasherEMSRR` and `mseEMSRR`.
+
+Processing can require substantial time, memory, and disk space. In
+particular, `data_00.a` creates a 10-worker cluster, `data_00.c` is
+configured for 500 realizations per RCP, and `model_04` currently
+requests 25 workers. Adjust worker settings to match available
+resources.
 
 ## Interpretation and citation
 
