@@ -7,7 +7,8 @@ library(ggplot2)
 fig_dir <- file.path("output", "figs")
 dir.create(fig_dir, recursive = TRUE, showWarnings = FALSE)
 
-sr_types <- c("BH", "SEG")
+# plot only for one model type as the selected covars are identical
+sr_types <- "SEG" #c("BH", "SEG")
 scenarios <- c("rcp45", "rcp85")
 periods <- c(2030L, 2040L, 2050L)
 
@@ -81,10 +82,10 @@ models <- setNames(lapply(sr_types, function(type) {
   )
 }), sr_types)
 
-stocks <- names(models[["BH"]])
-if (is.null(stocks) || anyDuplicated(stocks) ||
-    !setequal(stocks, names(models[["SEG"]])))
-  stop("The BH and SEG files must contain the same named substocks.")
+stocks <- names(models[["SEG"]])
+# if (is.null(stocks) || anyDuplicated(stocks) ||
+#     !setequal(stocks, names(models[["SEG"]])))
+#   stop("The BH and SEG files must contain the same named substocks.")
 
 history_parts <- list()
 projection_parts <- list()
@@ -278,7 +279,7 @@ p <- ggplot() +
         colour = scenario),
     linewidth = 1.5, show.legend = FALSE
   ) +
-  facet_wrap(vars(panel), ncol = 2, scales = "free_y") +
+  facet_wrap(vars(panel), scales = "free_y") +
   scale_colour_manual(
     values = series_colours, labels = series_labels,
     breaks = names(series_colours), name = "Series"
