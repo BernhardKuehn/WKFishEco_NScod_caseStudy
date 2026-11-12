@@ -223,18 +223,6 @@ The exact order and inputs for the truncated-ICES workflow may differ
 from the standard workflow; review that script's configuration before
 running it. Some scripts contain interactive diagnostics and plots.
 
-Processing can require substantial time, memory, and disk space. In
-particular:
-
--   `data_00.a` creates a cluster with 10 workers.
--   `data_00.c` is configured for 500 realizations per RCP, in batches
-    of 25, using four cores for simulation.
--   `data_00.d` uses two workers and writes worker messages to
-    `bottomT_workers.log`.
--   `model_03` currently uses 100 iterations and a final projection year
-    of 2099.
--   `model_04` currently requests 25 workers. Adjust `ncores` in the
-    script to suit the available machine.
 ## Method notes and interpretation
 
 ### Historical environment and stock alignment
