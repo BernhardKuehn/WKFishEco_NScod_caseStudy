@@ -107,6 +107,16 @@ maps::map(add =T)
 image(bottomT_by_substock$Viking,main = "Viking")
 maps::map(add =T)
 
+# store those as tifs
+for(i in 1:length(bottomT_by_substock)){
+  
+  terra::writeRaster(bottomT_by_substock[[i]],
+                     filename = file.path("./data/Env/processed",
+                                          paste0("AHOI_bottomT_substock_",names(bottomT_by_substock)[[i]],".tiff")),
+                     overwrite = T)
+  
+}
+
 # -------------------------------------- #
 # calculate yearly avg. over the regions
 # -------------------------------------- #
@@ -130,6 +140,12 @@ bottomT_yr_by_substock_ts = lapply(1:length(bottomT_yr_by_substock),function(i){
 # join
 yr = data.frame(year = 1945:2024)
 bottomT_substk = mult.merge("yr","bottomT_yr_by_substock_ts",by = "year")
+
+# write out
+write.table(bottomT_substk,"./data/Env/processed/AHOI_bottomT_yr_substock_avg.csv",
+            col.names = colnames(bottomT_substk),
+            row.names = F)
+
 
 # check difference
 par(mfrow = c(2,1))
