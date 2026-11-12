@@ -12,7 +12,7 @@ dir.create(fig_dir, recursive = TRUE, showWarnings = FALSE)
 # The 2006 projected environment predicts 2007 recruitment after the lag.
 first_projection_year <- 2007L
 last_projection_year <- 2099L
-sr_types <- c("BH", "SEG")
+sr_types <- c("BH", "SEG","SEG_trunc_ICES")
 scenarios <- c("rcp45", "rcp85")
 
 load_object <- function(path, object) {
