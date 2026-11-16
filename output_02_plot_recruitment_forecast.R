@@ -12,7 +12,7 @@ dir.create(fig_dir, recursive = TRUE, showWarnings = FALSE)
 # The 2006 projected environment predicts 2007 recruitment after the lag.
 first_projection_year <- 2007L
 last_projection_year <- 2099L
-sr_types <- c("BH", "SEG","SEG_trunc_ICES")
+sr_types <- c("SEG","SEG_trunc_ICES")
 scenarios <- c("rcp45", "rcp85")
 
 load_object <- function(path, object) {
@@ -79,10 +79,10 @@ models <- setNames(lapply(sr_types, function(type) {
   )
 }), sr_types)
 
-stocks <- names(models[["BH"]])
+stocks <- names(models[["SEG"]])
 if (is.null(stocks) || anyDuplicated(stocks) ||
     !setequal(stocks, names(models[["SEG"]])))
-  stop("The BH and SEG model files must contain the same named substocks.")
+  stop("The SEG model files must contain the same named substocks.")
 
 stock_file <- file.path(
   "data", "stock",
@@ -134,7 +134,7 @@ for (stock in stocks) {
     mean_ssb = fixed_ssb
   )
   
-  history <- models[["BH"]][[stock]]$stock.data
+  history <- models[["SEG"]][[stock]]$stock.data
   require_columns(history, c("year", "rec"), paste(stock, "history"))
   check_years(history$year, paste(stock, "historical recruitment"))
   

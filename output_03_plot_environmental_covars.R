@@ -8,7 +8,7 @@ fig_dir <- file.path("output", "figs")
 dir.create(fig_dir, recursive = TRUE, showWarnings = FALSE)
 
 # plot only for one model type as the selected covars are identical
-sr_types <- "SEG" #c("BH", "SEG")
+sr_types <- "SEG"
 scenarios <- c("rcp45", "rcp85")
 periods <- c(2030L, 2040L, 2050L)
 
@@ -83,9 +83,6 @@ models <- setNames(lapply(sr_types, function(type) {
 }), sr_types)
 
 stocks <- names(models[["SEG"]])
-# if (is.null(stocks) || anyDuplicated(stocks) ||
-#     !setequal(stocks, names(models[["SEG"]])))
-#   stop("The BH and SEG files must contain the same named substocks.")
 
 history_parts <- list()
 projection_parts <- list()

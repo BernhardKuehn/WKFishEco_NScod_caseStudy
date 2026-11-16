@@ -881,17 +881,6 @@ if(!setequal(names(selected_models),expected_substocks)){
   stop("Expected one selected model for each substock.")
 }
 
-is.bh = vapply(selected_models,function(x) !is.null(x$bh_model),logical(1))
-is.seg = vapply(selected_models,function(x) !is.null(x$seg_model),logical(1))
-
-if(all(is.bh & !is.seg)){
-  sr.type = "BH"
-} else if(all(is.seg & !is.bh)){
-  sr.type = "SEG"
-} else {
-  stop("Selected models must all use the same BH or segmented baseline.")
-}
-
 # The MARS fits use the internal predictor name "x". Translate the selected
 # environmental variable to that name when predicting with a saved model.
 predict.export = function(model.obj,newdata){
@@ -903,9 +892,7 @@ predict.export = function(model.obj,newdata){
          paste(model.obj$vars,collapse = ", "))
   }
   
-  if(!is.null(model.obj$BevertonHolt.model)){
-    sr = model.obj$BevertonHolt.model
-  } else if(!is.null(model.obj$HockeyStick.model)){
+if(!is.null(model.obj$HockeyStick.model)){
     sr = model.obj$HockeyStick.model
   } else {
     stop("No supported stock-recruitment model in model.obj.")
@@ -929,12 +916,11 @@ predict.export = function(model.obj,newdata){
 environment(predict.export) = baseenv()
 
 # Save the appropriate stock-recruitment function with the model.
-if(sr.type == "BH"){
-  sr.fun = function(par,x) par[["a"]]*x/(x+par[["b"]])
-  sr.name = "BevertonHolt.model"
-} else {
+if(grepl("SEG",sr.type)){
   sr.fun = function(par,x) par[["a"]]*pmin(x,par[["b"]])
   sr.name = "HockeyStick.model"
+} else {
+  stop("sr.type needs to be 'SEG' for segmented regression.")
 }
 environment(sr.fun) = baseenv()
 
@@ -977,14 +963,12 @@ for(substk in expected_substocks){
   }
   
   # Refit the selected stock-recruitment model on all available data.
-  if(sr.type == "BH"){
-    bounds = get_bh_bounds(substk,stock$rec,stock[[ssb_column]])
-    sr.fit = fit_bh(fit.data$rec,fit.data[[ssb_column]],bounds)
-    baseline = predict_bh(sr.fit,fit.data[[ssb_column]])
-  } else {
+  if(grepl("SEG",sr.type)){
     bounds = get_seg_bounds(substk,stock$rec,stock[[ssb_column]])
     sr.fit = fit_seg(fit.data$rec,fit.data[[ssb_column]],bounds)
     baseline = predict_seg(sr.fit,fit.data[[ssb_column]])
+  } else {
+    stop("sr.type needs to be 'SEG' for segmented regression.")
   }
   
   # Refit the selected environmental model to the full-data residuals.

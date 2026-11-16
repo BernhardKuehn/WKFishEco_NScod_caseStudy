@@ -86,7 +86,7 @@ if(!all(names(stks) %in% rownames(BRPs))){
 }
 
 # 3. loop through substocks ---------
-srr.type = c("BH","SEG","SEG_trunc_ICES")
+srr.type = c("SEG","SEG_trunc_ICES")
 
 for(srt in srr.type){ # loop through srr types
   
@@ -134,7 +134,7 @@ for(substock in rownames(BRPs)){
   predict.mod = emsrr.obj$model$predict.func
   
   # get shorter stock-name abbreviation
-  # Unique names also allow BH and SEG files to be loaded together
+  # Unique names also allow SRR-model files to be loaded together
   stk.nm = paste(substock,srt,sep = "_")
   
   # define the predict function to match the name of the stock

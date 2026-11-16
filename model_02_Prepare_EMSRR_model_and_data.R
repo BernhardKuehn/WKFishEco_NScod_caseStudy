@@ -17,7 +17,7 @@ library(minqa)
 # ------------------------- #
 
 # loop over the two different SR-types
-types = c("BH","SEG","SEG_trunc_ICES")
+types = c("SEG","SEG_trunc_ICES")
 
 for(sr.type in types){
 #sr.type = "BH" # change to "SEG" for the segmented models

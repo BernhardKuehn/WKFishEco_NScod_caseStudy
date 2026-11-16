@@ -81,7 +81,6 @@ par(old_par)
 # Each CSV contains one selected covariate per substock.
 selection_files <- c(
   Segreg = "./results/model_01_fit_EMSRR/SEG_variable_selection_summary.csv",
-  BH = "./results/model_01_fit_EMSRR/BH_variable_selection_summary.csv",
   Segreg_trunc_ICES =
     "./results/model_01_fit_EMSRR_SEG_ICES/SEG_variable_selection_summary.csv"
 )
@@ -178,7 +177,7 @@ par(old_par)
 
 ### save plots ###
 
-png(file.path("./output/figs","BottomT_clusters_per_substock.png"),res = 400,units = "in",width = 9,height = 6)
+png(file.path("./output/figs","BottomT_clusters_per_substock.png"),res = 400,units = "in",width = 9,height = 3.5)
 grDevices::replayPlot(plots_out$all_clusters)
 dev.off()
 

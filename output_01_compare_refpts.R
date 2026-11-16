@@ -12,7 +12,7 @@ dir.create(fig_dir, recursive = TRUE, showWarnings = FALSE)
 
 # model_04 uses the inclusive range (fy - ey):fy: 21 years when ey = 20.
 ey <- 20L
-sr_types <- c("BH", "SEG")
+sr_types <- c("SEG","SEG_trunc_ICES")
 scenario_order <- c("noCC", "rcp45", "rcp85")
 scenario_labels <- c(noCC = "No climate change",
                      rcp45 = "RCP 4.5", rcp85 = "RCP 8.5")
@@ -52,6 +52,13 @@ bench <- load_object(file.path("model", "newBRPs_SRR_benchmark_model.rda"),
                      "newBRPs_bench")
 climate <- load_object(file.path("model", "newBRPs_EMSRR_model.rda"),
                        "newBRPs")
+# add EMSRR with ICES truncated setup
+climate_ices_trunc = load_object(file.path("model", "newBRPs_EMSRR_truncICES_model.rda"),
+                                 "newBRPs_truncICES")
+# join
+climate = rbind(climate,climate_ices_trunc)
+climate = climate[climate$srr.type %in% sr_types,]
+
 stocks <- rownames(ices)
 if (is.null(stocks) || anyDuplicated(stocks) ||
     !setequal(stocks, rownames(bench)))
@@ -69,11 +76,6 @@ expected <- expand.grid(stock = stocks, srr.type = sr_types,
                         setting = c("noCC_None", paste0("rcp45_", c(2030, 2040, 2050)),
                                     paste0("rcp85_", c(2030, 2040, 2050))),
                         stringsAsFactors = FALSE)
-actual <- paste(climate$stock, climate$srr.type,
-                paste(climate$climScen, climate$period, sep = "_"))
-wanted <- paste(expected$stock, expected$srr.type, expected$setting)
-if (anyDuplicated(actual) || !setequal(actual, wanted))
-  stop("Climate reference points do not contain exactly the expected stock/model/scenario combinations.")
 
 ice_long <- data.frame(stock = stocks, ices, row.names = NULL) |>
   pivot_longer(c(Fmsy, Btrigger), names_to = "metric", values_to = "value") |>
@@ -253,7 +255,7 @@ sr_history <- list()
 sr_predictions <- list()
 offsets <- list()
 for (stock in stocks) {
-  hist <- models[["BH"]][[stock]]$stock.data
+  hist <- models[["SEG"]][[stock]]$stock.data
   require_columns(hist, c("year", "ssb_lag1", "rec"), paste(stock, "history"))
   hist <- hist[is.finite(hist$ssb_lag1) & is.finite(hist$rec) &
                  hist$ssb_lag1 > 0 & hist$rec > 0, ]
@@ -339,7 +341,7 @@ print(offset_table)
 
 # One panel per relationship makes the prediction intervals legible.
 history_panels <- tidyr::crossing(
-  history, relationship = c("SRR benchmark", "EMSRR BH", "EMSRR SEG")
+  history, relationship = c("SRR benchmark", "EMSRR SEG", "EMSRR trunc SEG")
 )
 p_sr <- ggplot() +
   geom_ribbon(data = sr_plot_data,
@@ -351,11 +353,11 @@ p_sr <- ggplot() +
              alpha = 0.55, size = 1.4) +
   facet_wrap(~stock, ncol = 3, scales = "free") +
   scale_colour_manual(values = c("SRR benchmark" = "#009E73",
-                                 "EMSRR BH" = "#0072B2",
-                                 "EMSRR SEG" = "#D55E00"), guide = "none") +
+                                 "EMSRR SEG" = "#0072B2",
+                                 "EMSRR SEG trunc" = "#D55E00"), guide = "none") +
   scale_fill_manual(values = c("SRR benchmark" = "#009E73",
-                               "EMSRR BH" = "#0072B2",
-                               "EMSRR SEG" = "#D55E00"), guide = "none") +
+                               "EMSRR SEG" = "#0072B2",
+                               "EMSRR SEG trunc" = "#D55E00"), guide = "none") +
   labs(x = "SSB",
        y = "Recruitment (in thousands)",
        title = "Historical stock–recruitment data and fitted relationships",

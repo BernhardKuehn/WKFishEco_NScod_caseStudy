@@ -155,8 +155,8 @@ cc = cc[!(cc$climScen %in% c("rcp45","rcp85") & cc$period == "None" |
 print(cc)
 # -------------------------------------------------- #
 
-# run for BH and Segreg
-srr.type = c("BH","SEG")
+# run for Segreg
+srr.type = c("SEG")
 
 newBRPs_list <- list() # to store the new ref-pts
 ii = 1

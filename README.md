@@ -139,10 +139,10 @@ for the case study has been configured here:
 download run the downloader-Script:
 
 ``` r
-source("data_00_download_inputs.R")
+source("data_00.a_download_inputs.R")
 ```
 
-The ZIP should contain the following paths directly at its root, without
+The stored data should contain the following paths directly at its root, without
 a wrapping folder:
 
 | Input | Expected location |
@@ -156,9 +156,9 @@ a wrapping folder:
 
 The original monthly AHOI files available for the North East Atlantic
 are available on request, as those were too big to store directly. Those
-can be processed with `data_00_Handle_AHOI_data.R`. If you already
+can be processed with `data_00.a_Handle_AHOI_data.R`. If you already
 downloaded `data/Env/processed/AHOI_BottomTemp_raster_1945_2024.tif`
-than there is no need to run `data_00_Handle_AHOI_data.R`.
+than there is no need to run `data_00.a_Handle_AHOI_data.R`.
 
 ### Generated data and model outputs
 
@@ -194,7 +194,6 @@ source("data_01_prepare_bottomT_by_stubstock.R")
 source("data_02_join_bottomT_with_substock.R")
 
 # Fit/select EMSRRs
-source("model_01_fit_EMSRR_BH.R")
 source("model_01_fit_EMSRR_Segreg.R")
 source("model_01_fit_EMSRR_Segreg_trunc.ICES.SRR.R")
 
@@ -240,7 +239,7 @@ conventions, missing values, and retained years before fitting.
 
 ### EMSRR model selection
 
-The BH and segmented model scripts use bootstrap out-of-bag performance
+The EMSRR model fitting scripts (`model_01_*`) use bootstrap out-of-bag performance
 to select a candidate environmental variable and MARS form for each
 substock. The latest 10 distinct calendar years are reserved for holdout
 evaluation; earlier complete observations are used for training. The
@@ -248,8 +247,10 @@ holdout scores are for training-only model selection and do not
 constitute an independent evaluation of the final full-data refits.
 
 `model_02` uses the selected variable and MARS form to refit models
-using common-footprint historical environmental values for the original
-fitting years. Model selection and holdout metrics are not recalculated
+using common-footprint historical environmental values (to assure an exact match 
+between the historical and projected bottom Temp. data, as some spatial areas might not,
+be present in the projection) for the original fitting years. 
+Model selection and holdout metrics are not recalculated
 on that common footprint.
 
 ### Projections and common footprint

@@ -28,8 +28,8 @@ BRPs_all = rowbind(BRPs,newBRPs,newBRPs_truncICES,newBRPs_bench,fill = T)
 # select Fmsy, FmsyL, FmsyU
 out = BRPs_all[,c("stock","Fmsy","FmsyL","FmsyH","srr.type","climScen","period","analysis_type")]
 
-# no BH
-out = out[out$srr.type != "BH",]
+# online segmented regression srr.type
+out = out[grepl("SEG",out$srr.type),]
 out$period = dplyr::recode(out$period,"None" = "Current")
 
 out$Note = ifelse(out$analysis_type == "SRR_eqsim","Those are the official ICES refpts from the 2026 assessment.",
