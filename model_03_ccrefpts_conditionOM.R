@@ -48,7 +48,7 @@ load(file = "./data/BRPs.Rdata")
 fy <- 2099
 
 # NUMBER of iterations (use only 100 for the moment)
-it <- 100 #500
+it <- 500
 
 # -------------------------------------------------- #
 # specify deviance type

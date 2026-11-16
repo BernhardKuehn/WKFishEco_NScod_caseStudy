@@ -95,7 +95,7 @@ load(file = "data/BRPs.Rdata")
 fy <- 2099
 
 # NUMBER of iterations (for the moment only 100 iterations due to time constraints)
-it <- 100 #500
+it <- 500
 
 # load stock file ----------------
 
