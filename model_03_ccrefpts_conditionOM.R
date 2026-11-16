@@ -508,8 +508,10 @@ for(substock in rownames(BRPs)){
   
   # - CONSTRUCT iem, implementation error module w/10% noise **
   # should be based on Fcv?? ****
+  rec.mean = rec(om)[,,,,,1] 
+  rec.mean[1,] <- 0
   iem <- FLiem(method=noise.iem,
-               args = list(noise=rlnorm(it, rec(om)[,,,,,1] %=% 0, 0.1)))
+               args = list(noise=rlnorm(it,rec.mean, 0.1)))
   
   
   # - SAVE
