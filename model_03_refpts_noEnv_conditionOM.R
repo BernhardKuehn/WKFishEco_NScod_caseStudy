@@ -1,3 +1,13 @@
+# ------------------------------------------------------------- #
+#################################################################
+# >>>>>>>>>> IMPORTANT NOTE FOR THIS TO RUN PROPERLY: <<<<<<<<< 
+# make sure 'FLasherEMSRR' and the 'mseEMSRR' package are NOT loaded!!!!
+# as those will provide conflicts with the same type of classes
+# defined in 'mse' and 'FLasher'
+# better start with a clean R-session + clean environment
+#################################################################
+# ------------------------------------------------------------- #
+
 # remove all existing objects ----------------
 rm(list = ls())
 
