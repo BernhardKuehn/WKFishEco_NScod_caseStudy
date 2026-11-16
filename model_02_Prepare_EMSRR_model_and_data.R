@@ -28,7 +28,7 @@ if(!sr.type %in% c("SEG","SEG_trunc_ICES")){
 model.file = file.path(
   "./data/EMSRRs",paste0("Cod.EMSRR_",sr.type,".RData")
 )
-selection.file = ifelse(sr.type %in% c("BH","SEG"),file.path(
+selection.file = ifelse(sr.type %in% c("SEG"),file.path(
   "./results/model_01_fit_EMSRR",
   paste0(sr.type,"_selected_emsrr_models.rds")
 ),file.path(
@@ -310,11 +310,11 @@ for(substk in substocks){
   }
   
   var = model$env.vars
-  sr.name = if(sr.type == "SEG") "HockeyStick.model" else NA
+  sr.name = if(grepl("SEG",sr.type)) "HockeyStick.model" else NA
   if(is.na(sr.name)){
     stop("Currently only segmented regression models (SEG) are supported")
   }
-  selected.sr = if(sr.type == "SEG") selected$seg_model else NA
+  selected.sr = if(grepl("SEG",sr.type)) selected$seg_model else NA
   
   if(!identical(selected$variable,var) || is.null(selected.sr) ||
      length(selected$linpreds) != 1L || is.na(selected$linpreds) ||
