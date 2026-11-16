@@ -198,7 +198,7 @@ for(substock in rownames(BRPs)){
                             ssb = as.numeric(ssb(stkSRyrs)))
     
     srpars$rho = rhologRec = rho_boot(srr.pars = srpars_df,ssb = ssb_rec_df$ssb,rec = ssb_rec_df$rec,
-                                      srr.model.func = list(segreg = segreg,bh = bh))
+                                      srr.model.func = list(segreg = segreg))
     # plot the rho distribution over the bootstrap samples
     hist(rhologRec,main = paste("Autocorr.",substock))
     
