@@ -279,15 +279,15 @@ p <- ggplot() +
   facet_wrap(vars(panel), scales = "free_y") +
   scale_colour_manual(
     values = series_colours, labels = series_labels,
-    breaks = names(series_colours), name = "Series"
+    breaks = names(series_colours), name = "Scenario"
   ) +
   scale_linetype_manual(
     values = series_linetypes, labels = series_labels,
-    breaks = names(series_colours), name = "Series"
+    breaks = names(series_colours), name = "Scenario"
   ) +
   scale_fill_manual(
     values = series_colours, labels = series_labels,
-    breaks = names(series_colours), name = "Series"
+    breaks = names(series_colours), name = "Scenario"
   ) +
   labs(
     x = "Recruitment year (environment from the preceding year)",
@@ -304,11 +304,14 @@ p <- ggplot() +
     )
   ) +
   theme_bw() +
-  theme(legend.position = "bottom")
+  theme(legend.position = "bottom") + 
+  guides(fill=guide_legend(title = "Scenario",nrow=2,byrow=TRUE),
+         linetype = guide_legend(title = "Scenario",nrow = 2,byrow = T),
+         colour = guide_legend(title = "Scenario",nrow = 2,byrow =T))
 
 ggsave(
   file.path(fig_dir, "environmental_covariates.png"),
-  p, width = 13, height = 10, dpi = 300
+  p, width = 8, height = 4, dpi = 300
 )
 
 write.csv(
