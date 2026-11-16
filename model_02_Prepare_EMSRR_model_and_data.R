@@ -20,10 +20,9 @@ library(minqa)
 types = c("SEG","SEG_trunc_ICES")
 
 for(sr.type in types){
-#sr.type = "BH" # change to "SEG" for the segmented models
 
-if(!sr.type %in% c("BH","SEG","SEG_trunc_ICES")){
-  stop("sr.type must be BH, SEG or SEG_trunc_ICES.")
+if(!sr.type %in% c("SEG","SEG_trunc_ICES")){
+  stop("sr.type must be SEG or SEG_trunc_ICES.")
 }
 
 model.file = file.path(
@@ -173,17 +172,7 @@ refit.baseline = function(rec,ssb,bounds,n.starts,type,maxfun){
   lower = log(c(a = bounds$a[1],b = bounds$b[1]))
   upper = log(c(a = bounds$a[2],b = bounds$b[2]))
   
-  if(type == "BH"){
-    
-    a0 = max(quantile(rec,0.75))
-    b0 = a0/max(quantile(rec/ssb,0.90))
-    
-    objective = function(par){
-      log.pred = par[1]+log(ssb)-log(ssb+exp(par[2]))
-      sum(abs(log(rec)-log.pred))
-    }
-    
-  } else {
+  if(grepl("SEG",type)){
     
     b0 = median(ssb)
     a0 = exp(median(log(rec)-log(pmin(ssb,b0))))
@@ -321,8 +310,11 @@ for(substk in substocks){
   }
   
   var = model$env.vars
-  sr.name = if(sr.type == "BH") "BevertonHolt.model" else "HockeyStick.model"
-  selected.sr = if(sr.type == "BH") selected$bh_model else selected$seg_model
+  sr.name = if(sr.type == "SEG") "HockeyStick.model" else NA
+  if(is.na(sr.name)){
+    stop("Currently only segmented regression models (SEG) are supported")
+  }
+  selected.sr = if(sr.type == "SEG") selected$seg_model else NA
   
   if(!identical(selected$variable,var) || is.null(selected.sr) ||
      length(selected$linpreds) != 1L || is.na(selected$linpreds) ||
@@ -394,39 +386,7 @@ for(substk in substocks){
   # Refit the baseline and selected MARS form on all original fit years.
   opt = model$SR.model$optimization
   
-  if (sr.type == "BH") {
-    # Reconstruct the stock data used to set model_01's full-data bounds.
-    stock <- unique(fit.data[fit.data$substock == substk,
-                             c("year", "rec", "ssb_lag1"), drop = FALSE])
-    
-    stock <- stock[complete.cases(stock) &
-                     is.finite(stock$year) &
-                     is.finite(stock$rec) & stock$rec > 0 &
-                     is.finite(stock$ssb_lag1) & stock$ssb_lag1 > 0,
-                   , drop = FALSE]
-    
-    if (!nrow(stock)) stop(substk, ": no valid stock data.")
-    
-    Smax <- max(stock$ssb_lag1)
-    expected <- list(
-      a = c(0.01 * min(stock$rec), 100 * max(stock$rec)),
-      b = c(Smax * (1 / 0.85 - 1), Smax * (1 / 0.75 - 1))
-    )
-    
-    if (!is.list(opt$bounds) ||
-        !isTRUE(all.equal(opt$bounds$a, expected$a,
-                          tolerance = 1e-8, check.attributes = FALSE)) ||
-        !isTRUE(all.equal(opt$bounds$b, expected$b,
-                          tolerance = 1e-8, check.attributes = FALSE))) {
-      stop(substk, ": saved BH bounds differ from the 75–85% constraints. ",
-           "Rerun model_01 and check that model_02 loads the new fit.")
-    }
-    
-    cat(substk, "| BH bounds verified; Smax =", Smax, "\n")
-  }
-  
-  
-  if(sr.type %in% c("BH","SEG")){
+  if(sr.type %in% c("SEG")){
   refit = refit.baseline(
     d$rec,d$ssb_lag1,opt$bounds,opt$n_starts,
     sr.type,refit.maxfun

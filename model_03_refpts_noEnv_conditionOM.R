@@ -14,7 +14,6 @@ source("functions/utilities.R")
 # segmented regression with fixed breakpoint at Blim (Bloss for type 6?)
 segreg3 <- function(ab, ssb) log(ifelse(ssb >= BlimBloss, ab$a * BlimBloss, ab$a * ssb))
 segreg <- function(params,ssb)  ifelse(ssb <= params$b, params$a * ssb, params$a * params$b)
-bh <- function(params,ssb) params$a * ssb/(params$b + ssb)
 
 # function to calculate a bootstrapped rho-estime for recruitment deviations
 rho_boot = function(srr.pars,ssb,rec,srr.model.func){
