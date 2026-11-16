@@ -207,7 +207,7 @@ period_levels <- do.call(rbind, period_parts)
 offsets <- do.call(rbind, offset_parts)
 
 panel_label <- function(stock, type, variable) {
-  paste0(stock, " | EMSRR ", type, "\n", variable)
+  paste0(stock, "\n", variable)
 }
 
 panel_levels <- unique(panel_label(
@@ -246,12 +246,16 @@ series_linetypes <- c(
   rcp85 = "solid"
 )
 
+series_order <- names(series_colours)
+fill_colours <- series_colours
+fill_colours["Historical"] <- NA
+
 p <- ggplot() +
   geom_ribbon(
     data = projected,
     aes(x = year, ymin = low, ymax = high, fill = scenario,
         group = scenario),
-    alpha = 0.14, colour = NA
+    alpha = 0.14, colour = NA, show.legend = TRUE
   ) +
   geom_line(
     data = projected,
@@ -279,39 +283,40 @@ p <- ggplot() +
   facet_wrap(vars(panel), scales = "free_y") +
   scale_colour_manual(
     values = series_colours, labels = series_labels,
-    breaks = names(series_colours), name = "Scenario"
+    limits = series_order, breaks = series_order, name = "Scenario"
   ) +
   scale_linetype_manual(
     values = series_linetypes, labels = series_labels,
-    breaks = names(series_colours), name = "Scenario"
+    limits = series_order, breaks = series_order, name = "Scenario"
   ) +
   scale_fill_manual(
-    values = series_colours, labels = series_labels,
-    breaks = names(series_colours), name = "Scenario"
+    values = fill_colours, labels = series_labels,
+    limits = series_order, breaks = series_order, name = "Scenario"
   ) +
   labs(
     x = "Recruitment year (environment from the preceding year)",
-    y = "Environmental covariate (model units)",
+    y = "Environmental covariate (°C)",
     title = "Historical and projected EMSRR environmental covariates",
     subtitle = paste(
       "Lines: annual realization medians; ribbons: 5th-95th percentiles",
-      "of all model_02 realizations.",
-      "Thick bars: model_03 decade-run mean levels."
+      "Thick bars: decade-run mean levels."
     ),
     caption = paste(
-      "noCC retains RCP4.5 variability around its historical 2006-2020 mean.",
+      "noCC retains RCP4.5 variability around its historical 2006-2020 mean.\n",
       "Decade bars cover recruitment years 2030-2039, 2040-2049 and 2050-2059."
     )
   ) +
   theme_bw() +
-  theme(legend.position = "bottom") + 
-  guides(fill=guide_legend(title = "Scenario",nrow=2,byrow=TRUE),
-         linetype = guide_legend(title = "Scenario",nrow = 2,byrow = T),
-         colour = guide_legend(title = "Scenario",nrow = 2,byrow =T))
+  theme(legend.position = "bottom") +
+  guides(
+    fill = guide_legend(nrow = 2, byrow = TRUE),
+    linetype = guide_legend(nrow = 2, byrow = TRUE),
+    colour = guide_legend(nrow = 2, byrow = TRUE)
+  )
 
 ggsave(
   file.path(fig_dir, "environmental_covariates.png"),
-  p, width = 8, height = 4, dpi = 300
+  p, width = 8.5, height = 5, dpi = 300
 )
 
 write.csv(
