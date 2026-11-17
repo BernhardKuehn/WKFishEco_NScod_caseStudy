@@ -1,6 +1,16 @@
 # remove all existing objects ----------------
 rm(list = ls())
 
+# check for conflicting model loads 
+local({
+  conflicts = intersect(c("FLasherEMSRR", "mseEMSRR"), loadedNamespaces())
+  if(length(conflicts)){
+    stop("Incompatible package(s) loaded: ", paste(conflicts, collapse = ", "),
+         ". Restart R before running this script: FLasherEMSRR and mseEMSRR are not ",
+         "compatible with FLasher, mse and msemodules.", call. = FALSE)
+  }
+})
+
 library(FLCore)
 library(FLasher)
 library(mse)
