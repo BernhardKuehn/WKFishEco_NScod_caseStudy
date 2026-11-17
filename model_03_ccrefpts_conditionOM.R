@@ -129,6 +129,30 @@ for(substock in rownames(BRPs)){
   # select per substock
   emsrr.obj = emsrr.obj_all[[substock]]
   
+  if(length(it) != 1L || !is.numeric(it) || is.na(it) ||
+     !is.finite(it) || it < 1 || it != floor(it)){
+    stop("it must be a positive whole number.")
+  }
+  
+  for(rcp in c("rcp45", "rcp85")){
+    for(env in emsrr.obj$model$env.vars){
+      x = emsrr.obj$env.variables$climate.projections[[rcp]][[env]]
+      
+      if(!is.data.frame(x) || sum(names(x) == "year") != 1L){
+        stop(substock, " / ", rcp, " / ", env,
+             ": missing or invalid projection table.")
+      }
+      
+      available = ncol(x) - 1L
+      if(available < it){
+        stop(substock, " / ", rcp, " / ", env, ": requested ", it,
+             " iterations, but only ", available, " are available.
+             \nPlease make sure enough realizations have been produced in 'data_00.c_Generate_projection_realisations_BVAR_500.R'!")
+      }
+    }
+  }
+  
+  
   # get model & predict function
   mod = emsrr.obj$model$SR.model
   predict.mod = emsrr.obj$model$predict.func
@@ -369,6 +393,7 @@ for(substock in rownames(BRPs)){
   
   covar.flq = FLQuants(lapply(env.proj,
                               function(x){
+                                x = x[seq_len(it)]  # use the first requested iterations
                                 # create multi-iter object
                                 itl = length(x)
                                 tmp.flq = FLQuant(x[[1]],dimnames = list(year = names(x[[1]])),iter = itl)
