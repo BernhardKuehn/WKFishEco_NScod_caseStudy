@@ -18,6 +18,11 @@ library(FLSRTMB)
 library(collapse)
 library(stringr)
 
+# 0. create directories ------------------------------------------------------
+# (if not already existing)
+
+dir.create("./model",showWarnings = F)
+
 # 1. required functions ------------------------------------------------------
 source("functions/utilities.R")
 
