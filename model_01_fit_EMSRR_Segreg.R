@@ -922,6 +922,14 @@ if(!setequal(names(selected_models),expected_substocks)){
   stop("Expected one selected model for each substock.")
 }
 
+is.seg = vapply(selected_models,function(x) !is.null(x$seg_model),logical(1))
+
+if(all(is.seg)){
+  sr.type = "SEG"
+} else {
+  stop("Selected models must all use the same segmented regression baseline.")
+}
+
 # The MARS fits use the internal predictor name "x". Translate the selected
 # environmental variable to that name when predicting with a saved model.
 predict.export = function(model.obj,newdata){
