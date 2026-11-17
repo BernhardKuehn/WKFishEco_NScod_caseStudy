@@ -68,7 +68,7 @@ repository. The scripts create intermediate and result files under
 | Script | Purpose |
 |------------------------------------|------------------------------------|
 | `model_01_fit_EMSRR_Segreg.R` | Fit and select segmented EMSRRs. |
-| `model_01_fit_EMSRR_Segreg_trunc.ICES.SRR.R` | Fit the truncated-ICES segmented EMSRR variant. |
+| `model_01_fit_EMSRR_Segreg_trunc.ICES.SRR.R` | Fit the truncated-ICES segmented EMSRR variant. For this script to run, `model_03_refpts_noEnv_conditionOM.R` needs to be run first, allowing a & b of the ICES fit being available. |
 | `output_05_plot_spatial_clusters.R` | Plot spatial cluster maps and, when available, the spatial representation of the covariates selected by each model. |
 
 The fitting scripts write model-selection summaries and other outputs
