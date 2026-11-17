@@ -876,6 +876,15 @@ print(holdout_metrics)
 output_dir = "./data/EMSRRs/"
 dir.create(output_dir,showWarnings = F)
 
+is.seg = vapply(selected_models,function(x) !is.null(x$seg_model),logical(1))
+
+if(all(is.seg)){
+  sr.type = "SEG_trunc_ICES" # specify the sr.type name
+} else {
+  stop("Selected models must all use the same segmented regression baseline.")
+}
+
+
 # The selection and holdout evaluation above are unchanged. These new fits use
 # all available data and must not be evaluated again on the same holdout.
 if(!setequal(names(selected_models),expected_substocks)){
@@ -1021,4 +1030,4 @@ for(substk in expected_substocks){
 }
 
 save(Cod.EMSRR,
-     file = file.path(output_dir, "Cod.EMSRR_SEG_trunc_ICES.RData"))
+     file = file.path(output_dir, paste0("Cod.EMSRR_",sr.type,".RData")))
