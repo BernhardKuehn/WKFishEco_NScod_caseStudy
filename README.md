@@ -316,3 +316,21 @@ management recommendation. Cite the source data, assessment products,
 model methods, and software used in any resulting report or publication.
 Interpret results only after the data, model fits, projections, and
 reference-point calculations have been reviewed and validated.
+
+## Additional resources
+
+See also my tutorials on [bias correction of climate data](https://doi.org/10.6084/m9.figshare.23514618) and the [generation of
+stochastic realisations of projected climate model runs](https://doi.org/10.6084/m9.figshare.23546127) via Bayesian Vector 
+Autoregression (BVARs) that are applied in this work. 
+
+## AI disclosure statement
+
+The work builds on already existing scripts and data used in the [SEAwise project](https://seawiseproject.org/) and 
+modified to match the requirements for this particular case study. Therefore github copilot (GPT 6.1 Luna/Terra) was used
+in assisted coding sessions to help in preperation, adaption of old code and structuring of the repository. 
+Outputs and results were checked to make sure scientific quality standards are met.  
+
+
+
+
+
