@@ -91,7 +91,8 @@ ices_files <- list()
 for (stk in expected_substocks) {
   file <- file.path("data", "SRRs",
                     paste0("Cod_", stk, "_SRR_bootstrap.rda"))
-  if (!file.exists(file)) stop("Missing benchmark fit: ", file)
+  if (!file.exists(file)) stop(paste("Missing benchmark fit: ", file,"!"),
+                               "\nRun 'model_03_refpts_noEnv_conditionOM.R' first!")
   
   e <- new.env()
   load(file, envir = e)
