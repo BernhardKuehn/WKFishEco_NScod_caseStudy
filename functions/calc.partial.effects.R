@@ -39,13 +39,13 @@ calc.partial.effects = function(model.obj,y,x,predict.func) {
     names(median_pdp)[which(names(median_pdp) == "Group.1")] = "yhat.id"
     
     
-    pdp_out.all[[n]] = melt(pdp_out,id.vars = c("yhat.id","yhat"))
-    median_pdp.all[[n]] = melt(median_pdp,id.vars = c("yhat.id","yhat"))
+    pdp_out.all[[n]] = reshape2::melt(pdp_out,id.vars = c("yhat.id","yhat"))
+    median_pdp.all[[n]] = reshape2::melt(median_pdp,id.vars = c("yhat.id","yhat"))
     n = n+1
   }
   pdp_out = do.call(rbind,pdp_out.all)
   median_pdp = do.call(rbind,median_pdp.all)
-  vars_pdp = melt(xy[,c("y",vars),drop = F],id.vars = "y")
+  vars_pdp = reshape2::melt(xy[,c("y",vars),drop = F],id.vars = "y")
   
   pdp.plot = ggplot(pdp_out,aes(x = value,y = yhat)) + 
              geom_line(aes(group = yhat.id)) +
