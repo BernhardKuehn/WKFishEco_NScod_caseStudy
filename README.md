@@ -5,7 +5,8 @@ relationships (EMSRRs) for the **Southern**, **Northwestern**, and
 **Viking** cod substocks. It combines stock-assessment recruitment and
 spawning-stock biomass (SSB) with historical and projected bottom
 temperature, then uses the fitted relationships in a climate-dependent
-reference-point workflow.
+reference-point workflow evaluated under the WKFishEco-workshop hosted 
+from the 09th - 13th in ICES, Kopenhagen.
 
 > **Project status:** Scripts are available for the workflow from
 > environmental data preparation through operating-model conditioning
@@ -154,8 +155,8 @@ a wrapping folder:
 | RCP4.5 POLCOMS-ERSEM bottom temperature | `data/Env/POLCOMS-ERSEM/POLCOM_ERSEM_GreaterNorthSea_rcp45_BottomTemp_raster_2006_2099.RData` |
 | RCP8.5 POLCOMS-ERSEM bottom temperature | `data/Env/POLCOMS-ERSEM/POLCOM_ERSEM_GreaterNorthSea_rcp85_BottomTemp_raster_2006_2099.RData` |
 
-The original monthly AHOI files available for the North East Atlantic
-are available on request, as those were too big to store directly. Those
+The original monthly AHOI files (v23.05) available for the North East Atlantic
+are hosted under the [European Digital Twin Ocean platform](https://ahoi.lab.dive.edito.eu/), as those were too big to store directly. Those
 can be processed with `data_00.a_Handle_AHOI_data.R`. If you already
 downloaded `data/Env/processed/AHOI_BottomTemp_raster_1945_2024.tif`
 than there is no need to run `data_00.a_Handle_AHOI_data.R`.
