@@ -5,8 +5,8 @@ relationships (EMSRRs) for the **Southern**, **Northwestern**, and
 **Viking** cod substocks. It combines stock-assessment recruitment and
 spawning-stock biomass (SSB) with historical and projected bottom
 temperature, then uses the fitted relationships in a climate-dependent
-reference-point workflow evaluated under the WKFishEco-workshop hosted 
-from the 09th - 13th in ICES, Kopenhagen.
+reference-point workflow. The work was done as part of the WKFishEco-workshop hosted 
+from the 09th - 13th of November 2026 in ICES, Kopenhagen (hybrid).
 
 > **Project status:** Scripts are available for the workflow from
 > environmental data preparation through operating-model conditioning
