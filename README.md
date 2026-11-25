@@ -274,7 +274,9 @@ environmental covariates.
 `model_03` conditions operating models for the three substocks and
 configured SR types and climate settings. `model_04` simulates target
 fishing mortalities and derives candidate reference-point values from
-the simulation outputs.
+the simulation outputs. Note that running the `model_04_ccrefpts`-Script takes 
+approximately 25mins per 100 iterations and 1.5h per 500 iterations for 
+each RCP-period combination on 25 cores on a Intel Xeon Gold 6330 Cluster.
 
 These are candidate calculations, not validated management reference
 points. Review scenario construction, projection coverage, stochastic
